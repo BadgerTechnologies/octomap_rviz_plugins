@@ -534,15 +534,8 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
       return;
     }
 
-    // Expand out update tree, then fill in leaves of local tree
-
-      octomap_update->expand();
-      unsigned int treeDepth = std::min<unsigned int>(tree_depth_property_->getInt(), octomap_update->getTreeDepth());
-      for(typename OcTreeType::iterator it = octomap_update->begin(treeDepth), end=octomap_update->end(); it!= end; it++)
-      {
-        typename OcTreeType::NodeType* node = octomap_update->search(it.getKey(), it.getDepth());
-        oc_tree_->setNodeValue(it.getKey(), node->getValue());
-      }
+    // Merge new tree into internal tree
+    oc_tree_->setTreeValues(octomap_update);
 
     delete octomap_update;
     new_map_update_received_ = true;
