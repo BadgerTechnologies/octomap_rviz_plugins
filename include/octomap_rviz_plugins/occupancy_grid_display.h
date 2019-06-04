@@ -42,6 +42,7 @@
 #include <message_filters/subscriber.h>
 
 #include <octomap_msgs/Octomap.h>
+#include <octomap_msgs/OctomapUpdate.h>
 
 #include <octomap/octomap.h>
 #include <octomap/OcTreeStamped.h>
@@ -93,7 +94,7 @@ protected:
   void unsubscribe();
 
   virtual void incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg) = 0;
-  virtual void incomingUpdateMessageCallback(const octomap_msgs::OctomapConstPtr& msg) = 0;
+  virtual void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg) = 0;
 
   void setColor( double z_pos, double min_z, double max_z, double color_factor, rviz::PointCloud::Point& point);
 
@@ -105,7 +106,7 @@ protected:
   typedef std::vector<VPoint> VVPoint;
 
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > map_sub_;
-  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > update_sub_;
+  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_;
 
   boost::mutex mutex_;
 
@@ -142,7 +143,7 @@ class TemplatedOccupancyGridDisplay: public OccupancyGridDisplay {
 protected:
   OcTreeType* oc_tree_ = NULL;
   void incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg);
-  void incomingUpdateMessageCallback(const octomap_msgs::OctomapConstPtr& msg);
+  void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg);
   void updateNewPoints();
   void setVoxelColor(rviz::PointCloud::Point& newPoint, typename OcTreeType::NodeType& node, double minZ, double maxZ);
   ///Returns false, if the type_id (of the message) does not correspond to the template paramter

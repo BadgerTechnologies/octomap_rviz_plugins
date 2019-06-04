@@ -49,6 +49,7 @@
 #include <octomap/octomap.h>
 #include <octomap/ColorOcTree.h>
 #include <octomap_msgs/Octomap.h>
+#include <octomap_msgs/OctomapUpdate.h>
 #include <octomap_msgs/conversions.h>
 
 
@@ -236,7 +237,7 @@ void OccupancyGridDisplay::subscribe()
     if (!updateTopicStr.empty())
     {
 
-      update_sub_.reset(new message_filters::Subscriber<octomap_msgs::Octomap>());
+      update_sub_.reset(new message_filters::Subscriber<octomap_msgs::OctomapUpdate>());
 
       update_sub_->subscribe(threaded_nh_, updateTopicStr, queue_size_);
       update_sub_->registerCallback(boost::bind(&OccupancyGridDisplay::incomingUpdateMessageCallback, this, _1));
@@ -497,15 +498,15 @@ bool OccupancyGridDisplay::updateFromTF()
 }
 
 template <typename OcTreeType>
-void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(const octomap_msgs::OctomapConstPtr& msg)
+void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg)
 {
   if(oc_tree_)
   {
     // creating octree
     map_updates_received_++;
     setStatus(StatusProperty::Ok, "Messages", QString::number(map_updates_received_) + " octomap updates received");
-    setStatusStd(StatusProperty::Ok, "Type", msg->id.c_str());
-    if(!checkType(msg->id)){
+    setStatusStd(StatusProperty::Ok, "Type", msg->octomap_bounds.id.c_str());
+    if(!checkType(msg->octomap_bounds.id)){
       setStatusStd(StatusProperty::Error, "Message", "Wrong octomap type. Use a different display type.");
       return;
     }
@@ -520,11 +521,14 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
     }
 
     // Get update data
-    OcTreeType* octomap_update = NULL;
-    octomap::AbstractOcTree* tree = octomap_msgs::msgToMap(*msg);
-    if (tree){
-      octomap_update = dynamic_cast<OcTreeType*>(tree);
-      if(!octomap_update){
+    OcTreeType* update_bounds = NULL;
+    OcTreeType* update_values = NULL;
+    octomap::AbstractOcTree* bounds_tree = octomap_msgs::msgToMap(msg->octomap_bounds);
+    octomap::AbstractOcTree* value_tree = octomap_msgs::msgToMap(msg->octomap_update);
+    if (bounds_tree && value_tree){
+      update_bounds = dynamic_cast<OcTreeType*>(bounds_tree);
+      update_values = dynamic_cast<OcTreeType*>(value_tree);
+      if(!update_bounds || !update_values){
         setStatusStd(StatusProperty::Error, "Message", "Wrong octomap_update type. Use a different display type.");
       }
     }
@@ -535,9 +539,12 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
     }
 
     // Merge new tree into internal tree
-    oc_tree_->setTreeValues(octomap_update);
-
-    delete octomap_update;
+    oc_tree_->setTreeValues(update_values,
+        update_bounds,
+        false,
+        true);
+    delete update_bounds;
+    delete update_values;
     new_map_update_received_ = true;
     updateNewPoints();
   }
