@@ -95,7 +95,7 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
 
   octomap_update_topic_property_ = new RosTopicProperty( "Octomap Update Topic",
                                                          "",
-                                                         QString::fromStdString(ros::message_traits::datatype<octomap_msgs::Octomap>()),
+                                                         QString::fromStdString(ros::message_traits::datatype<octomap_msgs::OctomapUpdate>()),
                                                          "octomap_msgs::Octomap update topic to subscribe to (binary or full probability map)",
                                                          this,
                                                          SLOT( updateTopic() ));
@@ -368,12 +368,8 @@ void OccupancyGridDisplay::update(float wall_dt, float ros_dt)
     {
       double size = box_size_[i];
 
-      if(!new_map_update_received_)
-      {
-        cloud_[i]->clear();
-        cloud_[i]->setDimensions(size, size, size);
-      }
-
+      cloud_[i]->clear();
+      cloud_[i]->setDimensions(size, size, size);
       cloud_[i]->addPoints(&new_points_[i].front(), new_points_[i].size());
 
       new_points_[i].clear();
@@ -539,10 +535,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
     }
 
     // Merge new tree into internal tree
-    oc_tree_->setTreeValues(update_values,
-        update_bounds,
-        false,
-        true);
+    oc_tree_->setTreeValues(update_values, update_bounds, false, true);
     delete update_bounds;
     delete update_values;
     new_map_update_received_ = true;
