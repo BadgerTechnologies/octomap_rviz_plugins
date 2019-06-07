@@ -80,6 +80,7 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
     rviz::Display(),
     new_points_received_(false),
     new_map_update_received_(false),
+    using_updates(false),
     maps_received_(0),
     map_updates_received_(0),
     queue_size_(5),
@@ -92,13 +93,6 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
                                                   "octomap_msgs::Octomap topic to subscribe to (binary or full probability map)",
                                                   this,
                                                   SLOT( updateTopic() ));
-
-  octomap_update_topic_property_ = new RosTopicProperty( "Octomap Update Topic",
-                                                         "",
-                                                         QString::fromStdString(ros::message_traits::datatype<octomap_msgs::OctomapUpdate>()),
-                                                         "octomap_msgs::Octomap update topic to subscribe to (binary or full probability map)",
-                                                         this,
-                                                         SLOT( updateTopic() ));
 
   queue_size_property_ = new IntProperty( "Queue Size",
                                           queue_size_,
@@ -232,7 +226,7 @@ void OccupancyGridDisplay::subscribe()
     }
 
     // Subscribe to update topic
-    const std::string& updateTopicStr = octomap_update_topic_property_->getStdString();
+    const std::string& updateTopicStr = octomap_topic_property_->getStdString() + "_updates";
 
     if (!updateTopicStr.empty())
     {
@@ -253,6 +247,7 @@ void OccupancyGridDisplay::subscribe()
 
 void OccupancyGridDisplay::unsubscribe()
 {
+  boost::mutex::scoped_lock lock(mutex_);
   clear();
 
   try
@@ -260,6 +255,7 @@ void OccupancyGridDisplay::unsubscribe()
     // reset filters
     map_sub_.reset();
     update_sub_.reset();
+    using_updates = false;
   }
   catch (ros::Exception& e)
   {
@@ -535,7 +531,11 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
     }
 
     // Merge new tree into internal tree
-    oc_tree_->setTreeValues(update_values, update_bounds, false, true);
+    {
+      boost::mutex::scoped_lock lock(mutex_);
+      using_updates = true;
+      oc_tree_->setTreeValues(update_values, update_bounds, false, true);
+    }
     delete update_bounds;
     delete update_values;
     new_map_update_received_ = true;
@@ -546,50 +546,58 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
 template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg)
 {
-  ++maps_received_;
-  map_updates_received_ = 0;
-  setStatus(StatusProperty::Ok, "Messages", QString::number(maps_received_) + " octomap messages received");
-  setStatusStd(StatusProperty::Ok, "Type", msg->id.c_str());
-  if(!checkType(msg->id)){
-    setStatusStd(StatusProperty::Error, "Message", "Wrong octomap type. Use a different display type.");
-    return;
-  }
-
-  ROS_DEBUG("Received OctomapBinary message (size: %d bytes)", (int)msg->data.size());
-
-  header_ = msg->header;
-  if (!updateFromTF()) {
-      std::stringstream ss;
-      ss << "Failed to transform from frame [" << header_.frame_id << "] to frame ["
-          << context_->getFrameManager()->getFixedFrame() << "]";
-      setStatusStd(StatusProperty::Error, "Message", ss.str());
-      return;
-  }
-
-  // creating octree
-  if(oc_tree_)
-    delete oc_tree_;
-  octomap::AbstractOcTree* tree = octomap_msgs::msgToMap(*msg);
-  if (tree){
-    oc_tree_ = dynamic_cast<OcTreeType*>(tree);
-    if(!oc_tree_){
+  boost::mutex::scoped_lock lock(mutex_);
+  if(!using_updates){
+    ++maps_received_;
+    map_updates_received_ = 0;
+    setStatus(StatusProperty::Ok, "Messages", QString::number(maps_received_) + " octomap messages received");
+    setStatusStd(StatusProperty::Ok, "Type", msg->id.c_str());
+    if(!checkType(msg->id)){
       setStatusStd(StatusProperty::Error, "Message", "Wrong octomap type. Use a different display type.");
+      return;
     }
+
+    ROS_DEBUG("Received OctomapBinary message (size: %d bytes)", (int)msg->data.size());
+
+    header_ = msg->header;
+    if (!updateFromTF()) {
+        std::stringstream ss;
+        ss << "Failed to transform from frame [" << header_.frame_id << "] to frame ["
+            << context_->getFrameManager()->getFixedFrame() << "]";
+        setStatusStd(StatusProperty::Error, "Message", ss.str());
+        return;
+    }
+
+
+    // creating octree
+    if(oc_tree_)
+      delete oc_tree_;
+    octomap::AbstractOcTree* tree = octomap_msgs::msgToMap(*msg);
+    if (tree){
+      oc_tree_ = dynamic_cast<OcTreeType*>(tree);
+      if(!oc_tree_){
+        setStatusStd(StatusProperty::Error, "Message", "Wrong octomap type. Use a different display type.");
+      }
+    }
+    else
+    {
+      setStatusStd(StatusProperty::Error, "Message", "Failed to deserialize octree message.");
+      return;
+    }
+
+    // reset rviz pointcloud classes
+    for (std::size_t i = 0; i < max_octree_depth_; ++i)
+    {
+      point_buf_[i].clear();
+      box_size_[i] = oc_tree_->getNodeSize(i + 1);
+    }
+
+    updateNewPoints();
   }
   else
   {
-    setStatusStd(StatusProperty::Error, "Message", "Failed to deserialize octree message.");
-    return;
+    map_sub_->unsubscribe();
   }
-
-  // reset rviz pointcloud classes
-  for (std::size_t i = 0; i < max_octree_depth_; ++i)
-  {
-    point_buf_[i].clear();
-    box_size_[i] = oc_tree_->getNodeSize(i + 1);
-  }
-
-  updateNewPoints();
 }
 
 

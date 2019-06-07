@@ -115,6 +115,7 @@ protected:
   VVPoint point_buf_;
   bool new_points_received_;
   bool new_map_update_received_;
+  bool using_updates;
 
   // Ogre-rviz point clouds
   std::vector<rviz::PointCloud*> cloud_;
@@ -124,7 +125,6 @@ protected:
   // Plugin properties
   rviz::IntProperty* queue_size_property_;
   rviz::RosTopicProperty* octomap_topic_property_;
-  rviz::RosTopicProperty* octomap_update_topic_property_;
   rviz::EnumProperty* octree_render_property_;
   rviz::EnumProperty* octree_coloring_property_;
   rviz::IntProperty* tree_depth_property_;
