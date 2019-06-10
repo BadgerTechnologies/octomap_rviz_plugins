@@ -247,8 +247,9 @@ void OccupancyGridDisplay::subscribe()
 
 void OccupancyGridDisplay::unsubscribe()
 {
-  boost::mutex::scoped_lock lock(mutex_);
+  // Clear hold the mutex as well, so take it after this call
   clear();
+  boost::mutex::scoped_lock lock(mutex_);
 
   try
   {
