@@ -249,7 +249,7 @@ void OccupancyGridDisplay::unsubscribe()
 {
   // Clear hold the mutex as well, so take it after this call
   clear();
-  boost::mutex::scoped_lock lock(mutex_);
+  mutex_.lock();
 
   try
   {
@@ -262,6 +262,8 @@ void OccupancyGridDisplay::unsubscribe()
   {
     setStatus(StatusProperty::Error, "Topic", (std::string("Error unsubscribing: ") + e.what()).c_str());
   }
+
+  mutex_.unlock();
 
 }
 
@@ -533,9 +535,10 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
 
     // Merge new tree into internal tree
     {
-      boost::mutex::scoped_lock lock(mutex_);
+      mutex_.lock();
       using_updates = true;
       oc_tree_->setTreeValues(update_values, update_bounds, false, true);
+      mutex_.unlock();
     }
     delete update_bounds;
     delete update_values;
@@ -547,7 +550,6 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
 template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg)
 {
-  boost::mutex::scoped_lock lock(mutex_);
   if(!using_updates){
     ++maps_received_;
     map_updates_received_ = 0;
@@ -571,6 +573,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
 
 
     // creating octree
+    mutex_.lock();
     if(oc_tree_)
       delete oc_tree_;
     octomap::AbstractOcTree* tree = octomap_msgs::msgToMap(*msg);
@@ -592,6 +595,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
       point_buf_[i].clear();
       box_size_[i] = oc_tree_->getNodeSize(i + 1);
     }
+    mutex_.unlock();
 
     updateNewPoints();
   }
