@@ -226,14 +226,13 @@ void OccupancyGridDisplay::subscribe()
     }
 
     // Subscribe to update topic
-    const std::string& updateTopicStr = octomap_topic_property_->getStdString() + "_updates";
+    const std::string& updateTopicStr = octomap_topic_property_->getStdString();
 
     if (!updateTopicStr.empty())
     {
-
       update_sub_.reset(new message_filters::Subscriber<octomap_msgs::OctomapUpdate>());
 
-      update_sub_->subscribe(threaded_nh_, updateTopicStr, queue_size_);
+      update_sub_->subscribe(threaded_nh_, updateTopicStr + "_updates", queue_size_);
       update_sub_->registerCallback(boost::bind(&OccupancyGridDisplay::incomingUpdateMessageCallback, this, _1));
 
     }
