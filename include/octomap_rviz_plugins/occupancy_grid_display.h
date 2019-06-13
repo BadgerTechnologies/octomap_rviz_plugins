@@ -37,7 +37,7 @@
 #include <ros/ros.h>
 
 #include <boost/shared_ptr.hpp>
-#include <boost/thread/mutex.hpp>
+#include <boost/thread/recursive_mutex.hpp>
 
 #include <message_filters/subscriber.h>
 
@@ -108,7 +108,7 @@ protected:
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > map_sub_;
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_;
 
-  boost::mutex mutex_;
+  boost::recursive_mutex mutex_;
 
   // point buffer
   VVPoint new_points_;

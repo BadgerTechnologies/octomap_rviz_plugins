@@ -148,7 +148,7 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
 
 void OccupancyGridDisplay::onInitialize()
 {
-  boost::mutex::scoped_lock lock(mutex_);
+  boost::recursive_mutex::scoped_lock lock(mutex_);
 
   box_size_.resize(max_octree_depth_);
   cloud_.resize(max_octree_depth_);
@@ -248,7 +248,7 @@ void OccupancyGridDisplay::unsubscribe()
 {
   // Clear hold the mutex as well, so take it after this call
   clear();
-  mutex_.lock();
+  boost::recursive_mutex::scoped_lock lock(mutex_);
 
   try
   {
@@ -261,8 +261,6 @@ void OccupancyGridDisplay::unsubscribe()
   {
     setStatus(StatusProperty::Error, "Topic", (std::string("Error unsubscribing: ") + e.what()).c_str());
   }
-
-  mutex_.unlock();
 
 }
 
@@ -347,8 +345,7 @@ void OccupancyGridDisplay::updateMinHeight()
 void OccupancyGridDisplay::clear()
 {
 
-  boost::mutex::scoped_lock lock(mutex_);
-
+  boost::recursive_mutex::scoped_lock lock(mutex_);
   // reset rviz pointcloud boxes
   for (size_t i = 0; i < cloud_.size(); ++i)
   {
@@ -356,11 +353,10 @@ void OccupancyGridDisplay::clear()
   }
 }
 
-void OccupancyGridDisplay::update(float wall_dt, float ros_dt)
-{
+void OccupancyGridDisplay::update(float wall_dt, float ros_dt) {
   if (new_points_received_)
   {
-    boost::mutex::scoped_lock lock(mutex_);
+    boost::recursive_mutex::scoped_lock lock(mutex_);
 
     for (size_t i = 0; i < max_octree_depth_; ++i)
     {
@@ -494,56 +490,53 @@ bool OccupancyGridDisplay::updateFromTF()
 template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg)
 {
+  // creating octree
+  map_updates_received_++;
+  setStatus(StatusProperty::Ok, "Messages", QString::number(map_updates_received_) + " octomap updates received");
+  setStatusStd(StatusProperty::Ok, "Type", msg->octomap_bounds.id.c_str());
+  if(!checkType(msg->octomap_bounds.id)){
+    setStatusStd(StatusProperty::Error, "Message", "Wrong octomap type. Use a different display type.");
+    return;
+  }
+
+  header_ = msg->header;
+  if (!updateFromTF()) {
+      std::stringstream ss;
+      ss << "Failed to transform from frame [" << header_.frame_id << "] to frame ["
+          << context_->getFrameManager()->getFixedFrame() << "]";
+      setStatusStd(StatusProperty::Error, "Message", ss.str());
+      return;
+  }
+
+  // Get update data
+  OcTreeType* update_bounds = NULL;
+  OcTreeType* update_values = NULL;
+  octomap::AbstractOcTree* bounds_tree = octomap_msgs::msgToMap(msg->octomap_bounds);
+  octomap::AbstractOcTree* value_tree = octomap_msgs::msgToMap(msg->octomap_update);
+  if (bounds_tree && value_tree){
+    update_bounds = dynamic_cast<OcTreeType*>(bounds_tree);
+    update_values = dynamic_cast<OcTreeType*>(value_tree);
+    if(!update_bounds || !update_values){
+      setStatusStd(StatusProperty::Error, "Message", "Wrong octomap_update type. Use a different display type.");
+    }
+  }
+  else
+  {
+    setStatusStd(StatusProperty::Error, "Message", "Failed to deserialize octree message.");
+    return;
+  }
+
+  // Merge new tree into internal tree
   if(oc_tree_)
   {
-    // creating octree
-    map_updates_received_++;
-    setStatus(StatusProperty::Ok, "Messages", QString::number(map_updates_received_) + " octomap updates received");
-    setStatusStd(StatusProperty::Ok, "Type", msg->octomap_bounds.id.c_str());
-    if(!checkType(msg->octomap_bounds.id)){
-      setStatusStd(StatusProperty::Error, "Message", "Wrong octomap type. Use a different display type.");
-      return;
-    }
-
-    header_ = msg->header;
-    if (!updateFromTF()) {
-        std::stringstream ss;
-        ss << "Failed to transform from frame [" << header_.frame_id << "] to frame ["
-            << context_->getFrameManager()->getFixedFrame() << "]";
-        setStatusStd(StatusProperty::Error, "Message", ss.str());
-        return;
-    }
-
-    // Get update data
-    OcTreeType* update_bounds = NULL;
-    OcTreeType* update_values = NULL;
-    octomap::AbstractOcTree* bounds_tree = octomap_msgs::msgToMap(msg->octomap_bounds);
-    octomap::AbstractOcTree* value_tree = octomap_msgs::msgToMap(msg->octomap_update);
-    if (bounds_tree && value_tree){
-      update_bounds = dynamic_cast<OcTreeType*>(bounds_tree);
-      update_values = dynamic_cast<OcTreeType*>(value_tree);
-      if(!update_bounds || !update_values){
-        setStatusStd(StatusProperty::Error, "Message", "Wrong octomap_update type. Use a different display type.");
-      }
-    }
-    else
-    {
-      setStatusStd(StatusProperty::Error, "Message", "Failed to deserialize octree message.");
-      return;
-    }
-
-    // Merge new tree into internal tree
-    {
-      mutex_.lock();
-      using_updates = true;
-      oc_tree_->setTreeValues(update_values, update_bounds, false, true);
-      mutex_.unlock();
-    }
-    delete update_bounds;
-    delete update_values;
-    new_map_update_received_ = true;
-    updateNewPoints();
+    boost::recursive_mutex::scoped_lock lock(mutex_);
+    using_updates = true;
+    oc_tree_->setTreeValues(update_values, update_bounds, false, true);
   }
+  delete update_bounds;
+  delete update_values;
+  new_map_update_received_ = true;
+  updateNewPoints();
 }
 
 template <typename OcTreeType>
@@ -572,9 +565,9 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
 
 
     // creating octree
-    mutex_.lock();
-    if(oc_tree_)
-      delete oc_tree_;
+    boost::recursive_mutex::scoped_lock lock(mutex_);
+    delete oc_tree_;
+    oc_tree_ = nullptr;
     octomap::AbstractOcTree* tree = octomap_msgs::msgToMap(*msg);
     if (tree){
       oc_tree_ = dynamic_cast<OcTreeType*>(tree);
@@ -594,7 +587,6 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
       point_buf_[i].clear();
       box_size_[i] = oc_tree_->getNodeSize(i + 1);
     }
-    mutex_.unlock();
 
     updateNewPoints();
   }
@@ -608,105 +600,107 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
 template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::updateNewPoints()
 {
-  tree_depth_property_->setMax(oc_tree_->getTreeDepth());
+  if(oc_tree_){
+    tree_depth_property_->setMax(oc_tree_->getTreeDepth());
 
-  // get dimensions of octree
-  double minX, minY, minZ, maxX, maxY, maxZ;
-  oc_tree_->getMetricMin(minX, minY, minZ);
-  oc_tree_->getMetricMax(maxX, maxY, maxZ);
+    // get dimensions of octree
+    double minX, minY, minZ, maxX, maxY, maxZ;
+    oc_tree_->getMetricMin(minX, minY, minZ);
+    oc_tree_->getMetricMax(maxX, maxY, maxZ);
 
-  size_t pointCount = 0;
-  {
-    // traverse all leafs in the tree:
-    unsigned int treeDepth = std::min<unsigned int>(tree_depth_property_->getInt(), oc_tree_->getTreeDepth());
-    double maxHeight = std::min<double>(max_height_property_->getFloat(), maxZ);
-    double minHeight = std::max<double>(min_height_property_->getFloat(), minZ);
-    int stepSize = 1 << (oc_tree_->getTreeDepth() - treeDepth); // for pruning of occluded voxels
-    for (typename OcTreeType::iterator it = oc_tree_->begin(treeDepth), end = oc_tree_->end(); it != end; ++it)
+    size_t pointCount = 0;
     {
+      // traverse all leafs in the tree:
+      unsigned int treeDepth = std::min<unsigned int>(tree_depth_property_->getInt(), oc_tree_->getTreeDepth());
+      double maxHeight = std::min<double>(max_height_property_->getFloat(), maxZ);
+      double minHeight = std::max<double>(min_height_property_->getFloat(), minZ);
+      int stepSize = 1 << (oc_tree_->getTreeDepth() - treeDepth); // for pruning of occluded voxels
+      for (typename OcTreeType::iterator it = oc_tree_->begin(treeDepth), end = oc_tree_->end(); it != end; ++it)
+      {
 
-        if(it.getZ() <= maxHeight && it.getZ() >= minHeight)
-        {
-          int render_mode_mask = octree_render_property_->getOptionInt();
-
-          bool display_voxel = false;
-
-          // the left part evaluates to 1 for free voxels and 2 for occupied voxels
-          if (((int)oc_tree_->isNodeOccupied(*it) + 1) & render_mode_mask)
+          if(it.getZ() <= maxHeight && it.getZ() >= minHeight)
           {
-            // check if current voxel has neighbors on all sides -> no need to be displayed
-            bool allNeighborsFound = true;
+            int render_mode_mask = octree_render_property_->getOptionInt();
 
-            octomap::OcTreeKey key;
-            octomap::OcTreeKey nKey = it.getKey();
+            bool display_voxel = false;
 
-            // determine indices of potentially neighboring voxels for depths < maximum tree depth
-            // +/-1 at maximum depth, +2^(depth_difference-1) and -2^(depth_difference-1)-1 on other depths
-            int diffBase = (it.getDepth() < oc_tree_->getTreeDepth()) ? 1 << (oc_tree_->getTreeDepth() - it.getDepth() - 1) : 1;
-            int diff[2] = {-((it.getDepth() == oc_tree_->getTreeDepth()) ? diffBase : diffBase + 1), diffBase};
-
-            // cells with adjacent faces can occlude a voxel, iterate over the cases x,y,z (idxCase) and +/- (diff)
-            for (unsigned int idxCase = 0; idxCase < 3; ++idxCase)
+            // the left part evaluates to 1 for free voxels and 2 for occupied voxels
+            if (((int)oc_tree_->isNodeOccupied(*it) + 1) & render_mode_mask)
             {
-              int idx_0 = idxCase % 3;
-              int idx_1 = (idxCase + 1) % 3;
-              int idx_2 = (idxCase + 2) % 3;
+              // check if current voxel has neighbors on all sides -> no need to be displayed
+              bool allNeighborsFound = true;
 
-              for (int i = 0; allNeighborsFound && i < 2; ++i)
+              octomap::OcTreeKey key;
+              octomap::OcTreeKey nKey = it.getKey();
+
+              // determine indices of potentially neighboring voxels for depths < maximum tree depth
+              // +/-1 at maximum depth, +2^(depth_difference-1) and -2^(depth_difference-1)-1 on other depths
+              int diffBase = (it.getDepth() < oc_tree_->getTreeDepth()) ? 1 << (oc_tree_->getTreeDepth() - it.getDepth() - 1) : 1;
+              int diff[2] = {-((it.getDepth() == oc_tree_->getTreeDepth()) ? diffBase : diffBase + 1), diffBase};
+
+              // cells with adjacent faces can occlude a voxel, iterate over the cases x,y,z (idxCase) and +/- (diff)
+              for (unsigned int idxCase = 0; idxCase < 3; ++idxCase)
               {
-                key[idx_0] = nKey[idx_0] + diff[i];
-                // if rendering is restricted to treeDepth < maximum tree depth inner nodes with distance stepSize can already occlude a voxel
-                for (key[idx_1] = nKey[idx_1] + diff[0] + 1; allNeighborsFound && key[idx_1] < nKey[idx_1] + diff[1]; key[idx_1] += stepSize)
-                {
-                  for (key[idx_2] = nKey[idx_2] + diff[0] + 1; allNeighborsFound && key[idx_2] < nKey[idx_2] + diff[1]; key[idx_2] += stepSize)
-                  {
-                    typename OcTreeType::NodeType* node = oc_tree_->search(key, treeDepth);
+                int idx_0 = idxCase % 3;
+                int idx_1 = (idxCase + 1) % 3;
+                int idx_2 = (idxCase + 2) % 3;
 
-                    // the left part evaluates to 1 for free voxels and 2 for occupied voxels
-                    if (!(node && ((((int)oc_tree_->isNodeOccupied(node)) + 1) & render_mode_mask)))
+                for (int i = 0; allNeighborsFound && i < 2; ++i)
+                {
+                  key[idx_0] = nKey[idx_0] + diff[i];
+                  // if rendering is restricted to treeDepth < maximum tree depth inner nodes with distance stepSize can already occlude a voxel
+                  for (key[idx_1] = nKey[idx_1] + diff[0] + 1; allNeighborsFound && key[idx_1] < nKey[idx_1] + diff[1]; key[idx_1] += stepSize)
+                  {
+                    for (key[idx_2] = nKey[idx_2] + diff[0] + 1; allNeighborsFound && key[idx_2] < nKey[idx_2] + diff[1]; key[idx_2] += stepSize)
                     {
-                      // we do not have a neighbor => break!
-                      allNeighborsFound = false;
+                      typename OcTreeType::NodeType* node = oc_tree_->search(key, treeDepth);
+
+                      // the left part evaluates to 1 for free voxels and 2 for occupied voxels
+                      if (!(node && ((((int)oc_tree_->isNodeOccupied(node)) + 1) & render_mode_mask)))
+                      {
+                        // we do not have a neighbor => break!
+                        allNeighborsFound = false;
+                      }
                     }
                   }
                 }
               }
+
+              display_voxel |= !allNeighborsFound;
             }
 
-            display_voxel |= !allNeighborsFound;
+
+            if (display_voxel)
+            {
+              PointCloud::Point newPoint;
+
+              newPoint.position.x = it.getX();
+              newPoint.position.y = it.getY();
+              newPoint.position.z = it.getZ();
+
+
+
+              setVoxelColor(newPoint, *it, minZ, maxZ);
+              // push to point vectors
+              unsigned int depth = it.getDepth();
+              point_buf_[depth - 1].push_back(newPoint);
+
+              ++pointCount;
+            }
           }
-
-
-          if (display_voxel)
-          {
-            PointCloud::Point newPoint;
-
-            newPoint.position.x = it.getX();
-            newPoint.position.y = it.getY();
-            newPoint.position.z = it.getZ();
-
-
-
-            setVoxelColor(newPoint, *it, minZ, maxZ);
-            // push to point vectors
-            unsigned int depth = it.getDepth();
-            point_buf_[depth - 1].push_back(newPoint);
-
-            ++pointCount;
-          }
-        }
+      }
     }
-  }
 
-  if (pointCount)
-  {
-    boost::mutex::scoped_lock lock(mutex_);
+    if (pointCount)
+    {
+      boost::recursive_mutex::scoped_lock lock(mutex_);
 
-    new_points_received_ = true;
+      new_points_received_ = true;
 
-    for (size_t i = 0; i < max_octree_depth_; ++i)
-      new_points_[i].swap(point_buf_[i]);
+      for (size_t i = 0; i < max_octree_depth_; ++i)
+        new_points_[i].swap(point_buf_[i]);
 
+    }
   }
 }
 
