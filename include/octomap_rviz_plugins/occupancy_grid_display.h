@@ -115,7 +115,7 @@ protected:
   VVPoint point_buf_;
   bool new_points_received_;
   bool new_map_update_received_;
-  bool using_updates;
+  bool using_updates_;
 
   // Ogre-rviz point clouds
   std::vector<rviz::PointCloud*> cloud_;

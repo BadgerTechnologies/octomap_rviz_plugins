@@ -80,7 +80,7 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
     rviz::Display(),
     new_points_received_(false),
     new_map_update_received_(false),
-    using_updates(false),
+    using_updates_(false),
     maps_received_(0),
     map_updates_received_(0),
     queue_size_(5),
@@ -225,7 +225,8 @@ void OccupancyGridDisplay::subscribe()
 
     }
 
-    // Subscribe to update topic
+
+    // Try to subscribe to update topic
     const std::string& updateTopicStr = octomap_topic_property_->getStdString();
 
     if (!updateTopicStr.empty())
@@ -234,8 +235,9 @@ void OccupancyGridDisplay::subscribe()
 
       update_sub_->subscribe(threaded_nh_, updateTopicStr + "_updates", queue_size_);
       update_sub_->registerCallback(boost::bind(&OccupancyGridDisplay::incomingUpdateMessageCallback, this, _1));
-
     }
+
+
   }
   catch (ros::Exception& e)
   {
@@ -246,16 +248,19 @@ void OccupancyGridDisplay::subscribe()
 
 void OccupancyGridDisplay::unsubscribe()
 {
-  // Clear hold the mutex as well, so take it after this call
-  clear();
+  // Local copy so destructor is called after mutex is released
+  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > map_sub_local_(map_sub_);
+  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_local_(update_sub_);
   boost::recursive_mutex::scoped_lock lock(mutex_);
+
+  clear();
 
   try
   {
     // reset filters
     map_sub_.reset();
     update_sub_.reset();
-    using_updates = false;
+    using_updates_ = false;
   }
   catch (ros::Exception& e)
   {
@@ -530,7 +535,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
   if(oc_tree_)
   {
     boost::recursive_mutex::scoped_lock lock(mutex_);
-    using_updates = true;
+    using_updates_ = true;
     oc_tree_->setTreeValues(update_values, update_bounds, false, true);
   }
   delete update_bounds;
@@ -542,7 +547,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
 template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg)
 {
-  if(!using_updates){
+  if(!using_updates_){
     ++maps_received_;
     map_updates_received_ = 0;
     setStatus(StatusProperty::Ok, "Messages", QString::number(maps_received_) + " octomap messages received");
@@ -589,10 +594,6 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
     }
 
     updateNewPoints();
-  }
-  else
-  {
-    map_sub_->unsubscribe();
   }
 }
 
