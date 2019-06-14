@@ -528,6 +528,9 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
   else
   {
     setStatusStd(StatusProperty::Error, "Message", "Failed to deserialize octree message.");
+    // Delete memory before this exit point
+    delete update_bounds;
+    delete update_values;
     return;
   }
 
@@ -538,6 +541,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
     using_updates_ = true;
     oc_tree_->setTreeValues(update_values, update_bounds, false, true);
   }
+
   delete update_bounds;
   delete update_values;
   new_map_update_received_ = true;
@@ -571,6 +575,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
 
     // creating octree
     boost::recursive_mutex::scoped_lock lock(mutex_);
+    // Effectively deletes "tree"
     delete oc_tree_;
     oc_tree_ = nullptr;
     octomap::AbstractOcTree* tree = octomap_msgs::msgToMap(*msg);
@@ -704,6 +709,12 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::updateNewPoints()
     }
   }
 }
+
+template <typename OcTreeType>
+TemplatedOccupancyGridDisplay<OcTreeType>::~TemplatedOccupancyGridDisplay(){
+  delete oc_tree_;
+}
+
 
 } // namespace octomap_rviz_plugin
 

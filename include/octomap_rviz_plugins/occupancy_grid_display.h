@@ -141,7 +141,8 @@ protected:
 template <typename OcTreeType>
 class TemplatedOccupancyGridDisplay: public OccupancyGridDisplay {
 protected:
-  OcTreeType* oc_tree_ = NULL;
+  OcTreeType* oc_tree_ = nullptr;
+  ~TemplatedOccupancyGridDisplay();
   void incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg);
   void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg);
   void updateNewPoints();
