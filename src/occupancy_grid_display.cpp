@@ -159,6 +159,7 @@ void OccupancyGridDisplay::onInitialize()
   {
     std::stringstream sname;
     sname << "PointCloud Nr." << i;
+    delete cloud_[i];
     cloud_[i] = new rviz::PointCloud();
     cloud_[i]->setName(sname.str());
     cloud_[i]->setRenderMode(rviz::PointCloud::RM_BOXES);
@@ -261,6 +262,7 @@ void OccupancyGridDisplay::unsubscribe()
     map_sub_.reset();
     update_sub_.reset();
     using_updates_ = false;
+    map_updates_received_ = 0;
   }
   catch (ros::Exception& e)
   {
@@ -496,6 +498,10 @@ template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg)
 {
   // creating octree
+  if (map_updates_received_ == 0) {
+    delete oc_tree_;
+    oc_tree_ = nullptr;
+  }
   map_updates_received_++;
   setStatus(StatusProperty::Ok, "Messages", QString::number(map_updates_received_) + " octomap updates received");
   setStatusStd(StatusProperty::Ok, "Type", msg->octomap_bounds.id.c_str());
@@ -540,10 +546,24 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
     boost::recursive_mutex::scoped_lock lock(mutex_);
     using_updates_ = true;
     oc_tree_->setTreeValues(update_values, update_bounds, false, true);
+    // We only want to delete these if they're copied in.  Otherwise this pointer
+    // becomes the global oc_tree_
+    delete update_values;
+  }
+  // If no tree exists, just fill it with our new values
+  else
+  {
+    boost::recursive_mutex::scoped_lock lock(mutex_);
+    oc_tree_ = update_values;
+    // reset rviz pointcloud classes
+    for (std::size_t i = 0; i < max_octree_depth_; ++i)
+    {
+      point_buf_[i].clear();
+      box_size_[i] = oc_tree_->getNodeSize(i + 1);
+    }
   }
 
   delete update_bounds;
-  delete update_values;
   new_map_update_received_ = true;
   updateNewPoints();
 }
@@ -606,6 +626,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
 template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::updateNewPoints()
 {
+  boost::recursive_mutex::scoped_lock lock(mutex_);
   if(oc_tree_){
     tree_depth_property_->setMax(oc_tree_->getTreeDepth());
 
@@ -699,7 +720,6 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::updateNewPoints()
 
     if (pointCount)
     {
-      boost::recursive_mutex::scoped_lock lock(mutex_);
 
       new_points_received_ = true;
 
