@@ -213,31 +213,30 @@ void OccupancyGridDisplay::subscribe()
   {
     unsubscribe();
 
-    // Subscribe to map topic
-    const std::string& mapTopicStr = octomap_topic_property_->getStdString();
-
-    if (!mapTopicStr.empty())
-    {
-
-      map_sub_.reset(new message_filters::Subscriber<octomap_msgs::Octomap>());
-
-      map_sub_->subscribe(threaded_nh_, mapTopicStr, queue_size_);
-      map_sub_->registerCallback(boost::bind(&OccupancyGridDisplay::incomingMapMessageCallback, this, _1));
-
-    }
-
-
     // Try to subscribe to update topic
     const std::string& updateTopicStr = octomap_topic_property_->getStdString();
 
     if (!updateTopicStr.empty())
     {
+      using_updates_ = true;
       update_sub_.reset(new message_filters::Subscriber<octomap_msgs::OctomapUpdate>());
-
       update_sub_->subscribe(threaded_nh_, updateTopicStr + "_updates", queue_size_);
       update_sub_->registerCallback(boost::bind(&OccupancyGridDisplay::incomingUpdateMessageCallback, this, _1));
     }
+    else
+    {
 
+      // Subscribe to map topic
+      const std::string& mapTopicStr = octomap_topic_property_->getStdString();
+
+      if (!mapTopicStr.empty())
+      {
+        map_sub_.reset(new message_filters::Subscriber<octomap_msgs::Octomap>());
+        map_sub_->subscribe(threaded_nh_, mapTopicStr, queue_size_);
+        map_sub_->registerCallback(boost::bind(&OccupancyGridDisplay::incomingMapMessageCallback, this, _1));
+
+      }
+    }
 
   }
   catch (ros::Exception& e)
@@ -498,6 +497,7 @@ template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg)
 {
   // creating octree
+  boost::recursive_mutex::scoped_lock lock(mutex_);
   if (map_updates_received_ == 0) {
     delete oc_tree_;
     oc_tree_ = nullptr;
@@ -543,17 +543,13 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
   // Merge new tree into internal tree
   if(oc_tree_)
   {
-    boost::recursive_mutex::scoped_lock lock(mutex_);
-    using_updates_ = true;
     oc_tree_->setTreeValues(update_values, update_bounds, false, true);
-    // We only want to delete these if they're copied in.  Otherwise this pointer
-    // becomes the global oc_tree_
+    // Since we've stored the values, delete this copy
     delete update_values;
   }
   // If no tree exists, just fill it with our new values
   else
   {
-    boost::recursive_mutex::scoped_lock lock(mutex_);
     oc_tree_ = update_values;
     // reset rviz pointcloud classes
     for (std::size_t i = 0; i < max_octree_depth_; ++i)
@@ -571,55 +567,68 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
 template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg)
 {
-  if(!using_updates_){
-    ++maps_received_;
-    map_updates_received_ = 0;
-    setStatus(StatusProperty::Ok, "Messages", QString::number(maps_received_) + " octomap messages received");
-    setStatusStd(StatusProperty::Ok, "Type", msg->id.c_str());
-    if(!checkType(msg->id)){
-      setStatusStd(StatusProperty::Error, "Message", "Wrong octomap type. Use a different display type.");
-      return;
-    }
-
-    ROS_DEBUG("Received OctomapBinary message (size: %d bytes)", (int)msg->data.size());
-
-    header_ = msg->header;
-    if (!updateFromTF()) {
-        std::stringstream ss;
-        ss << "Failed to transform from frame [" << header_.frame_id << "] to frame ["
-            << context_->getFrameManager()->getFixedFrame() << "]";
-        setStatusStd(StatusProperty::Error, "Message", ss.str());
-        return;
-    }
-
-
-    // creating octree
-    boost::recursive_mutex::scoped_lock lock(mutex_);
-    // Effectively deletes "tree"
+  boost::recursive_mutex::scoped_lock lock(mutex_);
+  if(!using_updates_) {
     delete oc_tree_;
     oc_tree_ = nullptr;
-    octomap::AbstractOcTree* tree = octomap_msgs::msgToMap(*msg);
-    if (tree){
-      oc_tree_ = dynamic_cast<OcTreeType*>(tree);
-      if(!oc_tree_){
-        setStatusStd(StatusProperty::Error, "Message", "Wrong octomap type. Use a different display type.");
-      }
-    }
-    else
-    {
-      setStatusStd(StatusProperty::Error, "Message", "Failed to deserialize octree message.");
-      return;
-    }
+  }
 
+  ++maps_received_;
+  map_updates_received_ = 0;
+  setStatus(StatusProperty::Ok, "Messages", QString::number(maps_received_) + " octomap messages received");
+  setStatusStd(StatusProperty::Ok, "Type", msg->id.c_str());
+  if(!checkType(msg->id)){
+    setStatusStd(StatusProperty::Error, "Message", "Wrong octomap type. Use a different display type.");
+    return;
+  }
+
+  ROS_DEBUG("Received OctomapBinary message (size: %d bytes)", (int)msg->data.size());
+
+  header_ = msg->header;
+  if (!updateFromTF()) {
+      std::stringstream ss;
+      ss << "Failed to transform from frame [" << header_.frame_id << "] to frame ["
+          << context_->getFrameManager()->getFixedFrame() << "]";
+      setStatusStd(StatusProperty::Error, "Message", ss.str());
+      return;
+  }
+
+  // Store octree data
+  OcTreeType* tree_values;
+  octomap::AbstractOcTree* tree = octomap_msgs::msgToMap(*msg);
+  if (tree){
+    tree_values = dynamic_cast<OcTreeType*>(tree);
+    if(!tree_values){
+      setStatusStd(StatusProperty::Error, "Message", "Wrong octomap type. Use a different display type.");
+    }
+  }
+  else
+  {
+    setStatusStd(StatusProperty::Error, "Message", "Failed to deserialize octree message.");
+    delete tree_values;
+    return;
+  }
+
+  // Merge new tree into internal tree
+  if(oc_tree_)
+  {
+    oc_tree_->setTreeValues(tree_values, tree_values, false, true);
+    // Since we've stored the values, delete this copy
+    delete tree_values;
+  }
+  // If there is no global tree, make the tree we just created the global tree
+  else
+  {
+    oc_tree_ = tree_values;
     // reset rviz pointcloud classes
     for (std::size_t i = 0; i < max_octree_depth_; ++i)
     {
       point_buf_[i].clear();
       box_size_[i] = oc_tree_->getNodeSize(i + 1);
     }
-
-    updateNewPoints();
   }
+
+  updateNewPoints();
 }
 
 
@@ -700,18 +709,13 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::updateNewPoints()
             if (display_voxel)
             {
               PointCloud::Point newPoint;
-
               newPoint.position.x = it.getX();
               newPoint.position.y = it.getY();
               newPoint.position.z = it.getZ();
-
-
-
               setVoxelColor(newPoint, *it, minZ, maxZ);
               // push to point vectors
               unsigned int depth = it.getDepth();
               point_buf_[depth - 1].push_back(newPoint);
-
               ++pointCount;
             }
           }
@@ -720,9 +724,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::updateNewPoints()
 
     if (pointCount)
     {
-
       new_points_received_ = true;
-
       for (size_t i = 0; i < max_octree_depth_; ++i)
         new_points_[i].swap(point_buf_[i]);
 
