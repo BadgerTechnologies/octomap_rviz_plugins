@@ -93,7 +93,6 @@ protected:
   void subscribe();
   void unsubscribe();
 
-  virtual void incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg) = 0;
   virtual void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg) = 0;
 
   void setColor( double z_pos, double min_z, double max_z, double color_factor, rviz::PointCloud::Point& point);
@@ -105,7 +104,6 @@ protected:
   typedef std::vector<rviz::PointCloud::Point> VPoint;
   typedef std::vector<VPoint> VVPoint;
 
-  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > map_sub_;
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_;
 
   boost::recursive_mutex mutex_;
@@ -115,7 +113,6 @@ protected:
   VVPoint point_buf_;
   bool new_points_received_;
   bool new_map_update_received_;
-  bool using_updates_;
 
   // Ogre-rviz point clouds
   std::vector<rviz::PointCloud*> cloud_;
@@ -143,7 +140,6 @@ class TemplatedOccupancyGridDisplay: public OccupancyGridDisplay {
 protected:
   OcTreeType* oc_tree_ = nullptr;
   ~TemplatedOccupancyGridDisplay();
-  void incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg);
   void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg);
   void updateNewPoints();
   void setVoxelColor(rviz::PointCloud::Point& newPoint, typename OcTreeType::NodeType& node, double minZ, double maxZ);
