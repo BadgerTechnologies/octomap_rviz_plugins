@@ -542,6 +542,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
 
   delete update_bounds;
   new_map_update_received_ = true;
+  setStatusStd(StatusProperty::Ok, "Message", "Message received and processed");
   updateNewPoints();
 }
 
