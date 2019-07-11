@@ -30,58 +30,73 @@
  *
  */
 
-#ifndef RVIZ_OCCUPANCY_MAP_DISPLAY_H
-#define RVIZ_OCCUPANCY_MAP_DISPLAY_H
-
-#ifndef Q_MOC_RUN 
-
-#include <qobject.h>
+#ifndef OCTOMAP_DISTANCE_TRACKER_H
+#define OCTOMAP_DISTANCE_TRACKER_H
 
 #include <ros/ros.h>
 
-#include "rviz/default_plugin/map_display.h"
-
-#include <octomap_msgs/Octomap.h>
-
-#include <octomap/OcTreeStamped.h>
+#include <boost/shared_ptr.hpp>
+#include <boost/thread/recursive_mutex.hpp>
 
 #include <message_filters/subscriber.h>
 
-#endif
+#include <octomap_msgs/Octomap.h>
+#include <octomap_msgs/OctomapUpdate.h>
 
-namespace octomap_rviz_plugin
+#include <octomap/octomap.h>
+#include <octomap/OcTreeStamped.h>
+#include <octomap/ColorOcTree.h>
+
+
+namespace octomap_distance_tracker
 {
 
-class OccupancyMapDisplay: public rviz::MapDisplay
+class OctomapDistanceTracker
 {
-Q_OBJECT
 public:
-  OccupancyMapDisplay();
-  virtual ~OccupancyMapDisplay();
-
-private Q_SLOTS:
-  void updateTopic();
-  void updateTreeDepth();
+  OctomapDistanceTracker(ros::NodeHandle private_nh_);
+  ~OctomapDistanceTracker();
 
 protected:
-  virtual void onInitialize();
-  virtual void subscribe();
-  virtual void unsubscribe();
+  void subscribe();
+  void unsubscribe();
 
-  virtual void handleOctomapBinaryMessage(const octomap_msgs::OctomapConstPtr& msg) = 0;
+  void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg);
+  void incomingRobotLocationCallback(const octomap_msgs::OctomapUpdateConstPtr& msg);
 
-  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > sub_;
+  void clear();
 
-  unsigned int octree_depth_;
-  rviz::IntProperty* tree_depth_property_;
+  //virtual bool updateFromTF();
+
+  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_;
+
+  boost::recursive_mutex mutex_;
+
+  // point buffer
+  bool new_points_received_;
+  bool new_map_update_received_;
+
+  // Ogre-rviz point clouds
+  std::vector<double> box_size_;
+  std_msgs::Header header_;
+
+  // Plugin properties
+  std::string octomap_topic_property_;
+  std::string tree_depth_property_;
+
+  u_int32_t queue_size_;
+  uint32_t maps_received_;
+  uint32_t map_updates_received_;
+
+  octomap::OcTree* oc_tree_ = nullptr;
+  //void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg);
+  //void updateNewPoints();
+  ///Returns false, if the type_id (of the message) does not correspond to the template paramter
+  ///of this class, true if correct or unknown (i.e., no specialized method for that template).
+  //bool checkType(std::string type_id);
 };
 
-template <typename OcTreeType>
-class TemplatedOccupancyMapDisplay: public OccupancyMapDisplay {
-protected:
-    void handleOctomapBinaryMessage(const octomap_msgs::OctomapConstPtr& msg);
-};
+}
 
-} // namespace rviz
 
- #endif
+#endif //OCCUPANCY_DISTANCE_TRACKER_H

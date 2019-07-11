@@ -1,14 +1,11 @@
 <package>
-  <name>octomap_rviz_plugins</name>
+  <name>octomap_distance_tracker</name>
   <version>0.2.0</version>
     <description>
      A set of plugins for displaying occupancy information decoded from binary octomap messages. 
     </description>
 
-  <maintainer email="armin@hornung.io">Armin Hornung</maintainer>
-  
-  <url type="website">http://ros.org/wiki/octomap_rviz_plugins</url>
-  <url type="bugtracker">https://github.com/OctoMap/octomap_rviz_plugins/issues</url>
+  <maintainer email="jacob_travis@jabil.com">jat</maintainer>
 
   <license>BSD</license>
 
@@ -16,18 +13,27 @@
 
   <buildtool_depend>catkin</buildtool_depend>
 
-  <build_depend>octomap_msgs</build_depend>
-  <build_depend>octomap</build_depend>
   <build_depend>roscpp</build_depend>
-  <build_depend>rviz</build_depend>
- 
-  <run_depend>octomap_msgs</run_depend>
-  <run_depend>octomap</run_depend>
+  <build_depend>nav_msgs</build_depend>
+  <build_depend>std_msgs</build_depend>
+  <build_depend>std_srvs</build_depend>
+  <build_depend>octomap</build_depend>
+  <build_depend>octomap_msgs</build_depend>
+  <build_depend>octomap_ros</build_depend>
+  <build_depend>dynamic_edt_3d</build_depend>
+  <build_depend>visualization_msgs</build_depend>
+
   <run_depend>roscpp</run_depend>
-  <run_depend>rviz</run_depend>
+  <run_depend>nav_msgs</run_depend>
+  <run_depend>std_msgs</run_depend>
+  <run_depend>std_srvs</run_depend>
+  <run_depend>octomap</run_depend>
+  <run_depend>octomap_msgs</run_depend>
+  <run_depend>octomap_ros</run_depend>
+  <run_depend>dynamic_edt_3d</run_depend>
+  <run_depend>visualization_msgs</run_depend>
 
   <export>
-    <rviz plugin="${prefix}/plugin_description.xml"/>
   </export>
 
 </package>
