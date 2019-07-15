@@ -23,7 +23,7 @@ int main(int argc, char** argv){
     exit(-1);
   }
 
-  OctomapDistanceTracker Tracker(private_nh);
+  OctomapDistanceTracker Tracker(private_nh, ros::Duration(0.1));
 
   try{
     ros::spin();

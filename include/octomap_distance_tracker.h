@@ -34,6 +34,7 @@
 #define OCTOMAP_DISTANCE_TRACKER_H
 
 #include <ros/ros.h>
+#include <tf2_ros/transform_listener.h>
 
 #include <boost/shared_ptr.hpp>
 #include <boost/thread/recursive_mutex.hpp>
@@ -46,6 +47,7 @@
 #include <octomap/octomap.h>
 #include <octomap/OcTreeStamped.h>
 #include <octomap/ColorOcTree.h>
+#include <dynamicEDT3D/dynamicEDTOctomap.h>
 
 
 namespace octomap_distance_tracker
@@ -54,7 +56,7 @@ namespace octomap_distance_tracker
 class OctomapDistanceTracker
 {
 public:
-  OctomapDistanceTracker(ros::NodeHandle private_nh_);
+  OctomapDistanceTracker(ros::NodeHandle private_nh_, ros::Duration update_period);
   ~OctomapDistanceTracker();
 
 protected:
@@ -62,11 +64,9 @@ protected:
   void unsubscribe();
 
   void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg);
-  void incomingRobotLocationCallback(const octomap_msgs::OctomapUpdateConstPtr& msg);
+  void timerCallback(const ros::TimerEvent&);
 
   void clear();
-
-  //virtual bool updateFromTF();
 
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_;
 
@@ -80,20 +80,24 @@ protected:
   std::vector<double> box_size_;
   std_msgs::Header header_;
 
-  // Plugin properties
   std::string octomap_topic_property_;
   std::string tree_depth_property_;
+  std::string base_frame_;
+  std::string fixed_frame_;
+
+  // Transform Buffer
+  boost::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  boost::shared_ptr<tf2_ros::TransformListener> listener_;
+
+  boost::shared_ptr<DynamicEDTOctomap> distmap_;
+
+  ros::Timer update_timer_;
 
   u_int32_t queue_size_;
   uint32_t maps_received_;
   uint32_t map_updates_received_;
 
   octomap::OcTree* oc_tree_ = nullptr;
-  //void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg);
-  //void updateNewPoints();
-  ///Returns false, if the type_id (of the message) does not correspond to the template paramter
-  ///of this class, true if correct or unknown (i.e., no specialized method for that template).
-  //bool checkType(std::string type_id);
 };
 
 }

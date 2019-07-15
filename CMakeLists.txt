@@ -41,8 +41,7 @@ set(LINK_LIBS
   ${PCL_LIBRARIES}
   ${DYNAMICEDT3D_LIBRARIES}
 )
-message("JAT: ${DYNAMICEDT3D_LIBRARIES}")
-message("JAT2: ${DYNAMICEDT3D_LIBRARY}")
+
 add_library(${PROJECT_NAME}
   src/octomap_distance_tracker.cpp
 )

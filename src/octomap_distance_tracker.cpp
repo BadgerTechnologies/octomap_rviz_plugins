@@ -32,7 +32,7 @@
 #include <boost/bind.hpp>
 #include <boost/shared_ptr.hpp>
 
-#include <tf/transform_listener.h>
+#include <geometry_msgs/TransformStamped.h>
 
 #include <octomap/octomap.h>
 #include <octomap/ColorOcTree.h>
@@ -40,7 +40,6 @@
 #include <octomap_msgs/OctomapUpdate.h>
 #include <octomap_msgs/conversions.h>
 
-#include <dynamicEDT3D/dynamicEDTOctomap.h>
 #include <octomap_distance_tracker.h>
 
 #include <sstream>
@@ -56,20 +55,25 @@ enum OctreeVoxelRenderMode
   OCTOMAP_OCCUPIED_VOXELS = 2
 };
 
-OctomapDistanceTracker::OctomapDistanceTracker(ros::NodeHandle private_nh_) :
+OctomapDistanceTracker::OctomapDistanceTracker(ros::NodeHandle private_nh_, ros::Duration update_period) :
   new_points_received_(false),
   new_map_update_received_(false),
   maps_received_(0),
   map_updates_received_(0),
   queue_size_(5),
-  octomap_topic_property_("/octomap/octomap_binary_updates")
-
+  octomap_topic_property_("/octomap/octomap_binary_updates"),
+  base_frame_("map"),
+  fixed_frame_("odom")
 {
   ros::NodeHandle private_nh(private_nh_);
   private_nh.param("tracked_octomap_topic", octomap_topic_property_, octomap_topic_property_);
   update_sub_->subscribe(private_nh, octomap_topic_property_, queue_size_);
   update_sub_->registerCallback(boost::bind(&OctomapDistanceTracker::incomingUpdateMessageCallback, this, _1));
 
+  tf_buffer_.reset(new tf2_ros::Buffer);
+  listener_.reset(new tf2_ros::TransformListener(*tf_buffer_));
+
+  update_timer_ = private_nh.createTimer(update_period, boost::bind(&OctomapDistanceTracker::timerCallback, this, _1));
 }
 
 OctomapDistanceTracker::~OctomapDistanceTracker()
@@ -138,10 +142,12 @@ void OctomapDistanceTracker::incomingUpdateMessageCallback(const octomap_msgs::O
   //- argument 5 defines whether unknown space is treated as occupied or free
   //The constructor copies data but does not yet compute the distance map
   // Static makes this distmap only be created once
-  static DynamicEDTOctomap distmap(maxDist, oc_tree_, min, max, false);
-  //distmap.boundingBoxMaxKey = update_bounds->bbx_max_key;
-  //distmap.boundingBoxMinKey = update_bounds->bbx_min_key;
-  distmap.update();
+  if(!distmap_){
+	  distmap_ = boost::shared_ptr<DynamicEDTOctomap>(new DynamicEDTOctomap(maxDist, oc_tree_, min, max, false));
+  }
+  //distmap_.boundingBoxMaxKey = update_bounds->bbx_max_key;
+  //distmap_.boundingBoxMinKey = update_bounds->bbx_min_key;
+  distmap_->update();
 
   // No reason to preserve bounds
   delete update_bounds;
@@ -150,9 +156,30 @@ void OctomapDistanceTracker::incomingUpdateMessageCallback(const octomap_msgs::O
   //updateNewPoints();
 }
 
-//void OccupancyDistanceTracker::incomingRobotLocationCallback(const octomap_msgs::OctomapUpdateConstPtr& msg){
-//
-//}
+void OctomapDistanceTracker::timerCallback(const ros::TimerEvent&){
+	geometry_msgs::TransformStamped point_to_base_tf;
+
+    // Lookup depth_frame at time it was acquired to base_frame at current time (odom frame fixed in time)
+    try {
+    	point_to_base_tf = tf_buffer_->lookupTransform("odom", "base", ros::Time(0));
+
+    } catch (...) {
+        // Transform lookup failed
+    	ROS_WARN("Transform failed!");
+        return;
+    }
+
+	octomap::point3d observer(
+		point_to_base_tf.transform.translation.x,
+		point_to_base_tf.transform.translation.y,
+		0.5f
+		);
+
+    float dist = distmap_->getDistance(observer);
+
+    ROS_INFO_STREAM("Closest point: " << dist << std::endl);
+
+}
 
 
 } // namespace
