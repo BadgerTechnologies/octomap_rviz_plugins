@@ -61,14 +61,14 @@ OctomapDistanceTracker::OctomapDistanceTracker(ros::NodeHandle private_nh_, ros:
   maps_received_(0),
   map_updates_received_(0),
   queue_size_(5),
-  octomap_topic_property_("/octomap/octomap_binary_updates"),
+  octomap_topic_property_("/octomap/front_lidar/octomap_binary_updates"),
   base_frame_("map"),
   fixed_frame_("odom")
 {
   ros::NodeHandle private_nh(private_nh_);
   private_nh.param("tracked_octomap_topic", octomap_topic_property_, octomap_topic_property_);
-  update_sub_->subscribe(private_nh, octomap_topic_property_, queue_size_);
-  update_sub_->registerCallback(boost::bind(&OctomapDistanceTracker::incomingUpdateMessageCallback, this, _1));
+  update_sub_.subscribe(private_nh, octomap_topic_property_, queue_size_);
+  update_sub_.registerCallback(boost::bind(&OctomapDistanceTracker::incomingUpdateMessageCallback, this, _1));
 
   tf_buffer_.reset(new tf2_ros::Buffer);
   listener_.reset(new tf2_ros::TransformListener(*tf_buffer_));
@@ -161,11 +161,11 @@ void OctomapDistanceTracker::timerCallback(const ros::TimerEvent&){
 
     // Lookup depth_frame at time it was acquired to base_frame at current time (odom frame fixed in time)
     try {
-    	point_to_base_tf = tf_buffer_->lookupTransform("odom", "base", ros::Time(0));
+    	point_to_base_tf = tf_buffer_->lookupTransform("map", "base_link", ros::Time(0));
 
-    } catch (...) {
+    } catch (tf2::TransformException &ex) {
         // Transform lookup failed
-    	ROS_WARN("Transform failed!");
+    	ROS_WARN("%s", ex.what());
         return;
     }
 
@@ -175,9 +175,13 @@ void OctomapDistanceTracker::timerCallback(const ros::TimerEvent&){
 		0.5f
 		);
 
-    float dist = distmap_->getDistance(observer);
-
-    ROS_INFO_STREAM("Closest point: " << dist << std::endl);
+	if(distmap_) {
+		float dist = distmap_->getDistance(observer);
+		ROS_INFO("x: %f, y: %f, z: %f" , observer.x(), observer.y(), observer.z());
+    	ROS_INFO_STREAM("Closest point: " << dist);
+	} else {
+		ROS_WARN_THROTTLE(10, "Distmap does not yet exist");
+	}
 
 }
 

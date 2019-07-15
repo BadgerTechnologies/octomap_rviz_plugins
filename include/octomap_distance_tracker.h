@@ -68,7 +68,7 @@ protected:
 
   void clear();
 
-  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_;
+  message_filters::Subscriber<octomap_msgs::OctomapUpdate> update_sub_;
 
   boost::recursive_mutex mutex_;
 
