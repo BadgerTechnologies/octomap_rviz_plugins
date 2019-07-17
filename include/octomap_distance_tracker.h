@@ -66,6 +66,8 @@ protected:
   void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg);
   void timerCallback(const ros::TimerEvent&);
 
+  void publishMap(octomap::OcTree* oc_tree);
+
   void clear();
 
   message_filters::Subscriber<octomap_msgs::OctomapUpdate> update_sub_;
@@ -75,6 +77,7 @@ protected:
   // point buffer
   bool new_points_received_;
   bool new_map_update_received_;
+  bool dist_map_created_;
 
   // Ogre-rviz point clouds
   std::vector<double> box_size_;
@@ -89,9 +92,10 @@ protected:
   boost::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   boost::shared_ptr<tf2_ros::TransformListener> listener_;
 
-  boost::shared_ptr<DynamicEDTOctomap> distmap_;
+  DynamicEDTOctomap* distmap_ = nullptr;
 
   ros::Timer update_timer_;
+  ros::Publisher dist_octree_pub_;
 
   u_int32_t queue_size_;
   uint32_t maps_received_;

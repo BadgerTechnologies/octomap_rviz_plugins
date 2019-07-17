@@ -62,8 +62,9 @@ OctomapDistanceTracker::OctomapDistanceTracker(ros::NodeHandle private_nh_, ros:
   map_updates_received_(0),
   queue_size_(5),
   octomap_topic_property_("/octomap/front_lidar/octomap_binary_updates"),
-  base_frame_("map"),
-  fixed_frame_("odom")
+  base_frame_("base_link"),
+  fixed_frame_("map"),
+  dist_map_created_(false)
 {
   ros::NodeHandle private_nh(private_nh_);
   private_nh.param("tracked_octomap_topic", octomap_topic_property_, octomap_topic_property_);
@@ -73,34 +74,28 @@ OctomapDistanceTracker::OctomapDistanceTracker(ros::NodeHandle private_nh_, ros:
   tf_buffer_.reset(new tf2_ros::Buffer);
   listener_.reset(new tf2_ros::TransformListener(*tf_buffer_));
 
+  dist_octree_pub_ = private_nh.advertise<octomap_msgs::Octomap>("dist_octomap", 1);
+
   update_timer_ = private_nh.createTimer(update_period, boost::bind(&OctomapDistanceTracker::timerCallback, this, _1));
 }
 
 OctomapDistanceTracker::~OctomapDistanceTracker()
 {
   delete oc_tree_;
+  delete distmap_;
 }
 
 void OctomapDistanceTracker::incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg)
 {
-  static bool dist_map_created = false;
-  // creating octree
   boost::recursive_mutex::scoped_lock lock(mutex_);
+  // creating octree
   if (map_updates_received_ == 0) {
     delete oc_tree_;
     oc_tree_ = nullptr;
   }
   map_updates_received_++;
 
-//  if(!checkType(msg->octomap_bounds.id)){
-//    return;
-//  }
-
   header_ = msg->header;
-//  if (!updateFromTF()) {
-//      std::stringstream ss;
-//      return;
-//  }
 
   // Get update data
   octomap::OcTree* update_bounds = (octomap::OcTree*)octomap_msgs::msgToMap(msg->octomap_bounds);
@@ -130,10 +125,10 @@ void OctomapDistanceTracker::incomingUpdateMessageCallback(const octomap_msgs::O
   double x,y,z;
   oc_tree_->getMetricMin(x,y,z);
   octomap::point3d min(x,y,z);
-  //std::cout<<"Metric min: "<<x<<","<<y<<","<<z<<std::endl;
+  std::cout<<std::endl<<"Metric min: "<<x<<","<<y<<","<<z<<std::endl;
   oc_tree_->getMetricMax(x,y,z);
   octomap::point3d max(x,y,z);
-  //std::cout<<"Metric max: "<<x<<","<<y<<","<<z<<std::endl;
+  std::cout<<"Metric max: "<<x<<","<<y<<","<<z<<std::endl;
   float maxDist = 1.0;
 
   //- the first argument ist the max distance at which distance computations are clamped
@@ -141,27 +136,28 @@ void OctomapDistanceTracker::incomingUpdateMessageCallback(const octomap_msgs::O
   //- arguments 3 and 4 can be used to restrict the distance map to a subarea
   //- argument 5 defines whether unknown space is treated as occupied or free
   //The constructor copies data but does not yet compute the distance map
-  // Static makes this distmap only be created once
-  if(!distmap_){
-	  distmap_ = boost::shared_ptr<DynamicEDTOctomap>(new DynamicEDTOctomap(maxDist, oc_tree_, min, max, false));
+  if(!dist_map_created_){
+	  distmap_ = new DynamicEDTOctomap(maxDist, oc_tree_, min, max, false);
+	  dist_map_created_ = true;
   }
   //distmap_.boundingBoxMaxKey = update_bounds->bbx_max_key;
   //distmap_.boundingBoxMinKey = update_bounds->bbx_min_key;
-  distmap_->update();
+  distmap_->update(update_bounds);
 
   // No reason to preserve bounds
   delete update_bounds;
   new_map_update_received_ = true;
   ROS_DEBUG("Message received and processed");
-  //updateNewPoints();
 }
 
 void OctomapDistanceTracker::timerCallback(const ros::TimerEvent&){
-	geometry_msgs::TransformStamped point_to_base_tf;
+	boost::recursive_mutex::scoped_lock lock(mutex_);
+	geometry_msgs::TransformStamped fixed_to_base_tf, fixed_to_odom_tf;
 
     // Lookup depth_frame at time it was acquired to base_frame at current time (odom frame fixed in time)
     try {
-    	point_to_base_tf = tf_buffer_->lookupTransform("map", "base_link", ros::Time(0));
+    	fixed_to_base_tf = tf_buffer_->lookupTransform("odom", base_frame_, ros::Time(0));
+    	//fixed_to_odom_tf = tf_buffer_->lookupTransform("odom", base_frame_, ros::Time(0));
 
     } catch (tf2::TransformException &ex) {
         // Transform lookup failed
@@ -170,19 +166,38 @@ void OctomapDistanceTracker::timerCallback(const ros::TimerEvent&){
     }
 
 	octomap::point3d observer(
-		point_to_base_tf.transform.translation.x,
-		point_to_base_tf.transform.translation.y,
+		//0,0,0.5f
+		fixed_to_base_tf.transform.translation.x,
+		fixed_to_base_tf.transform.translation.y,
 		0.5f
 		);
+	octomap::point3d observed;
 
-	if(distmap_) {
-		float dist = distmap_->getDistance(observer);
+	if(dist_map_created_) {
+		//distmap_->
+		float dist(0);
+		distmap_->getDistanceAndClosestObstacle(observer, dist, observed);
 		ROS_INFO("x: %f, y: %f, z: %f" , observer.x(), observer.y(), observer.z());
+		ROS_INFO("x: %f, y: %f, z: %f" , observed.x(), observed.y(), observed.z());
     	ROS_INFO_STREAM("Closest point: " << dist);
+    	publishMap(oc_tree_);
 	} else {
 		ROS_WARN_THROTTLE(10, "Distmap does not yet exist");
 	}
 
+
+}
+
+void OctomapDistanceTracker::publishMap(octomap::OcTree* oc_tree)
+{
+//  octomap_msgs::Octomap map;
+//  map.header.frame_id = "odom";
+//  map.header.stamp = ros::Time::now();
+//
+//  if (octomap_msgs::binaryMapToMsg(*oc_tree, map))
+//	  dist_octree_pub_.publish(map);
+//  else
+//    ROS_ERROR("Error serializing OctoMap");
 }
 
 
