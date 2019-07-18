@@ -36,6 +36,9 @@
 #include <ros/ros.h>
 #include <tf2_ros/transform_listener.h>
 
+#include <pcl_msgs/PointIndices.h>
+#include <sensor_msgs/PointCloud2.h>
+
 #include <boost/shared_ptr.hpp>
 #include <boost/thread/recursive_mutex.hpp>
 
@@ -63,14 +66,15 @@ protected:
   void subscribe();
   void unsubscribe();
 
-  void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg);
-  void timerCallback(const ros::TimerEvent&);
+  void incomingMapCallback(const octomap_msgs::OctomapConstPtr& msg);
+  void incomingPointcloudCallback(const sensor_msgs::PointCloud2ConstPtr& msg);
 
   void publishMap(octomap::OcTree* oc_tree);
 
   void clear();
 
-  message_filters::Subscriber<octomap_msgs::OctomapUpdate> update_sub_;
+  message_filters::Subscriber<octomap_msgs::Octomap> map_sub_;
+  message_filters::Subscriber<sensor_msgs::PointCloud2> pointcloud_sub_;
 
   boost::recursive_mutex mutex_;
 
@@ -81,7 +85,8 @@ protected:
 
   // Ogre-rviz point clouds
   std::vector<double> box_size_;
-  std_msgs::Header header_;
+  std_msgs::Header map_header_;
+  std_msgs::Header pointcloud_header_;
 
   std::string octomap_topic_property_;
   std::string tree_depth_property_;
@@ -94,7 +99,6 @@ protected:
 
   DynamicEDTOctomap* distmap_ = nullptr;
 
-  ros::Timer update_timer_;
   ros::Publisher dist_octree_pub_;
 
   u_int32_t queue_size_;

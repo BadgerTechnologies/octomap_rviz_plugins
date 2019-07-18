@@ -34,6 +34,10 @@
 
 #include <geometry_msgs/TransformStamped.h>
 
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl_ros/transforms.h>
+//#include <pcl/io/io.h>
+
 #include <octomap/octomap.h>
 #include <octomap/ColorOcTree.h>
 #include <octomap_msgs/Octomap.h>
@@ -63,20 +67,22 @@ OctomapDistanceTracker::OctomapDistanceTracker(ros::NodeHandle private_nh_, ros:
   queue_size_(5),
   octomap_topic_property_("/octomap/front_lidar/octomap_binary_updates"),
   base_frame_("base_link"),
-  fixed_frame_("map"),
+  fixed_frame_("odom"),
   dist_map_created_(false)
 {
   ros::NodeHandle private_nh(private_nh_);
   private_nh.param("tracked_octomap_topic", octomap_topic_property_, octomap_topic_property_);
-  update_sub_.subscribe(private_nh, octomap_topic_property_, queue_size_);
-  update_sub_.registerCallback(boost::bind(&OctomapDistanceTracker::incomingUpdateMessageCallback, this, _1));
+  map_sub_.subscribe(private_nh, octomap_topic_property_, queue_size_);
+  map_sub_.registerCallback(boost::bind(&OctomapDistanceTracker::incomingMapCallback, this, _1));
+  pointcloud_sub_.subscribe(private_nh, "tophat/pointcloud", queue_size_);
+  pointcloud_sub_.registerCallback(boost::bind(&OctomapDistanceTracker::incomingPointcloudCallback, this, _1));
 
   tf_buffer_.reset(new tf2_ros::Buffer);
   listener_.reset(new tf2_ros::TransformListener(*tf_buffer_));
 
   dist_octree_pub_ = private_nh.advertise<octomap_msgs::Octomap>("dist_octomap", 1);
 
-  update_timer_ = private_nh.createTimer(update_period, boost::bind(&OctomapDistanceTracker::timerCallback, this, _1));
+
 }
 
 OctomapDistanceTracker::~OctomapDistanceTracker()
@@ -85,42 +91,26 @@ OctomapDistanceTracker::~OctomapDistanceTracker()
   delete distmap_;
 }
 
-void OctomapDistanceTracker::incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg)
+void OctomapDistanceTracker::incomingMapCallback(const octomap_msgs::OctomapConstPtr& msg)
 {
   boost::recursive_mutex::scoped_lock lock(mutex_);
-  // creating octree
-  if (map_updates_received_ == 0) {
-    delete oc_tree_;
-    oc_tree_ = nullptr;
-  }
-  map_updates_received_++;
 
-  header_ = msg->header;
+  map_header_ = msg->header;
 
-  // Get update data
-  octomap::OcTree* update_bounds = (octomap::OcTree*)octomap_msgs::msgToMap(msg->octomap_bounds);
-  octomap::OcTree* update_values = (octomap::OcTree*)octomap_msgs::msgToMap(msg->octomap_update);
-  if (!(update_bounds && update_values)){
+  delete oc_tree_;
+  oc_tree_ = nullptr;
+
+  // Deserialize map data
+  octomap::OcTree* update_bounds = (octomap::OcTree*)octomap_msgs::msgToMap(*msg);
+  if (!update_bounds){
     ROS_ERROR("Failed to deserialize octree message.");
     // Delete memory before this exit point
     delete update_bounds;
-    delete update_values;
     return;
   }
 
-  // Merge new tree into internal tree
-  if(oc_tree_)
-  {
-    oc_tree_->setTreeValues(update_values, update_bounds, false, true);
-    // Since we've stored the values, delete this copy
-    delete update_values;
-  }
-  // If no tree exists, just fill it with our new values
-  // Do not delete update_values in this case because it becomes the internal tree
-  else
-  {
-    oc_tree_ = update_values;
-  }
+  // Update internal tree
+  oc_tree_ = update_bounds;
 
   double x,y,z;
   oc_tree_->getMetricMin(x,y,z);
@@ -129,41 +119,45 @@ void OctomapDistanceTracker::incomingUpdateMessageCallback(const octomap_msgs::O
   oc_tree_->getMetricMax(x,y,z);
   octomap::point3d max(x,y,z);
   std::cout<<"Metric max: "<<x<<","<<y<<","<<z<<std::endl;
-  float maxDist = 1.0;
+  float maxDist = 5.0;
 
   //- the first argument ist the max distance at which distance computations are clamped
   //- the second argument is the octomap
   //- arguments 3 and 4 can be used to restrict the distance map to a subarea
   //- argument 5 defines whether unknown space is treated as occupied or free
   //The constructor copies data but does not yet compute the distance map
-  if(!dist_map_created_){
-	  distmap_ = new DynamicEDTOctomap(maxDist, oc_tree_, min, max, false);
-	  dist_map_created_ = true;
-  }
-  //distmap_.boundingBoxMaxKey = update_bounds->bbx_max_key;
-  //distmap_.boundingBoxMinKey = update_bounds->bbx_min_key;
-  distmap_->update(update_bounds);
-
-  // No reason to preserve bounds
-  delete update_bounds;
-  new_map_update_received_ = true;
-  ROS_DEBUG("Message received and processed");
+  delete distmap_;
+  distmap_ = new DynamicEDTOctomap(maxDist, oc_tree_, min, max, false);
+  distmap_->update();
+  ROS_INFO("Message received and processed");
 }
 
-void OctomapDistanceTracker::timerCallback(const ros::TimerEvent&){
+void OctomapDistanceTracker::incomingPointcloudCallback(const sensor_msgs::PointCloud2ConstPtr& msg){
 	boost::recursive_mutex::scoped_lock lock(mutex_);
-	geometry_msgs::TransformStamped fixed_to_base_tf, fixed_to_odom_tf;
+	geometry_msgs::TransformStamped fixed_to_base_tf;
+
+	pointcloud_header_ = msg->header;
+	pcl::PCLPointCloud2 pointcloud2;
+	pcl::PointCloud<pcl::PointXYZ>::Ptr pointcloud(new pcl::PointCloud<pcl::PointXYZ>());
+	pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_pointcloud(new pcl::PointCloud<pcl::PointXYZ>());
+
+    pcl_conversions::toPCL(*msg, pointcloud2);
+    pcl::fromPCLPointCloud2(pointcloud2, *pointcloud);
 
     // Lookup depth_frame at time it was acquired to base_frame at current time (odom frame fixed in time)
     try {
-    	fixed_to_base_tf = tf_buffer_->lookupTransform("odom", base_frame_, ros::Time(0));
-    	//fixed_to_odom_tf = tf_buffer_->lookupTransform("odom", base_frame_, ros::Time(0));
+    	fixed_to_base_tf = tf_buffer_->lookupTransform(fixed_frame_, base_frame_, ros::Time(0));
 
     } catch (tf2::TransformException &ex) {
         // Transform lookup failed
     	ROS_WARN("%s", ex.what());
         return;
     }
+
+	tf::StampedTransform fixed_to_base_tf2;
+	tf::transformStampedMsgToTF(fixed_to_base_tf, fixed_to_base_tf2);
+
+    pcl_ros::transformPointCloud(*pointcloud, *transformed_pointcloud, fixed_to_base_tf2);
 
 	octomap::point3d observer(
 		//0,0,0.5f

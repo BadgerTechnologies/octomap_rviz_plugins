@@ -10,6 +10,9 @@ set(PACKAGE_DEPENDENCIES
   std_srvs
   octomap_ros
   octomap_msgs
+  pcl_ros
+  pcl_conversions
+  sensor_msgs
 )
 
 
