@@ -48,6 +48,11 @@
 
 #include <sstream>
 
+// For profiling
+#include <chrono>
+using namespace std::chrono;
+
+
 namespace octomap_distance_tracker
 {
 
@@ -80,7 +85,7 @@ OctomapDistanceTracker::OctomapDistanceTracker(ros::NodeHandle private_nh_, ros:
   tf_buffer_.reset(new tf2_ros::Buffer);
   listener_.reset(new tf2_ros::TransformListener(*tf_buffer_));
 
-  dist_octree_pub_ = private_nh.advertise<octomap_msgs::Octomap>("dist_octomap", 1);
+  matching_pointcloud_pub_ = private_nh.advertise<sensor_msgs::PointCloud2>("static_map_match", 1);
 
 
 }
@@ -93,49 +98,53 @@ OctomapDistanceTracker::~OctomapDistanceTracker()
 
 void OctomapDistanceTracker::incomingMapCallback(const octomap_msgs::OctomapConstPtr& msg)
 {
-  boost::recursive_mutex::scoped_lock lock(mutex_);
+	boost::recursive_mutex::scoped_lock lock(mutex_);
 
-  map_header_ = msg->header;
+	map_header_ = msg->header;
 
-  delete oc_tree_;
-  oc_tree_ = nullptr;
+	delete oc_tree_;
+	oc_tree_ = nullptr;
 
-  // Deserialize map data
-  octomap::OcTree* update_bounds = (octomap::OcTree*)octomap_msgs::msgToMap(*msg);
-  if (!update_bounds){
-    ROS_ERROR("Failed to deserialize octree message.");
-    // Delete memory before this exit point
-    delete update_bounds;
-    return;
-  }
+	// Deserialize map data
+	octomap::OcTree* update_bounds = (octomap::OcTree*)octomap_msgs::msgToMap(*msg);
+	if (!update_bounds){
+	ROS_ERROR("Failed to deserialize octree message.");
+	// Delete memory before this exit point
+	delete update_bounds;
+	return;
+	}
 
-  // Update internal tree
-  oc_tree_ = update_bounds;
+	// Update internal tree
+	oc_tree_ = update_bounds;
 
-  double x,y,z;
-  oc_tree_->getMetricMin(x,y,z);
-  octomap::point3d min(x,y,z);
-  std::cout<<std::endl<<"Metric min: "<<x<<","<<y<<","<<z<<std::endl;
-  oc_tree_->getMetricMax(x,y,z);
-  octomap::point3d max(x,y,z);
-  std::cout<<"Metric max: "<<x<<","<<y<<","<<z<<std::endl;
-  float maxDist = 5.0;
+	double x,y,z;
+	oc_tree_->getMetricMin(x,y,z);
+	octomap::point3d min(x,y,z);
+	std::cout<<std::endl<<"Metric min: "<<x<<","<<y<<","<<z<<std::endl;
+	oc_tree_->getMetricMax(x,y,z);
+	octomap::point3d max(x,y,z);
+	std::cout<<"Metric max: "<<x<<","<<y<<","<<z<<std::endl;
+	float maxDist = 1.0;
 
-  //- the first argument ist the max distance at which distance computations are clamped
-  //- the second argument is the octomap
-  //- arguments 3 and 4 can be used to restrict the distance map to a subarea
-  //- argument 5 defines whether unknown space is treated as occupied or free
-  //The constructor copies data but does not yet compute the distance map
-  delete distmap_;
-  distmap_ = new DynamicEDTOctomap(maxDist, oc_tree_, min, max, false);
-  distmap_->update();
-  dist_map_created_ = true;
-  ROS_INFO("Message received and processed");
+	//- the first argument ist the max distance at which distance computations are clamped
+	//- the second argument is the octomap
+	//- arguments 3 and 4 can be used to restrict the distance map to a subarea
+	//- argument 5 defines whether unknown space is treated as occupied or free
+	//The constructor copies data but does not yet compute the distance map
+	auto start = high_resolution_clock::now();
+	delete distmap_;
+	distmap_ = new DynamicEDTOctomap(maxDist, oc_tree_, min, max, false);
+	distmap_->update();
+	auto stop = high_resolution_clock::now();
+	auto duration = duration_cast<microseconds>(stop - start);
+	dist_map_created_ = true;
+	ROS_INFO("Message received and processed in %li seconds", duration.count()/1000000);
 }
 
 void OctomapDistanceTracker::incomingPointcloudCallback(const sensor_msgs::PointCloud2ConstPtr& msg){
 	boost::recursive_mutex::scoped_lock lock(mutex_);
 	geometry_msgs::TransformStamped fixed_to_base_tf;
+	sensor_msgs::PointCloud2 msg_out;
 
 	pointcloud_header_ = msg->header;
 	pcl::PCLPointCloud2 pointcloud2;
@@ -147,8 +156,8 @@ void OctomapDistanceTracker::incomingPointcloudCallback(const sensor_msgs::Point
 
     // Lookup depth_frame at time it was acquired to base_frame at current time (odom frame fixed in time)
     try {
-    	fixed_to_base_tf = tf_buffer_->lookupTransform(fixed_frame_, base_frame_, ros::Time(0));
-
+    	//fixed_to_base_tf = tf_buffer_->lookupTransform(&map_header_.frame_id[1], &pointcloud_header_.frame_id[1], ros::Time(0));
+    	fixed_to_base_tf = tf_buffer_->lookupTransform("map", "odom", ros::Time(0));
     } catch (tf2::TransformException &ex) {
         // Transform lookup failed
     	ROS_WARN("%s", ex.what());
@@ -168,19 +177,41 @@ void OctomapDistanceTracker::incomingPointcloudCallback(const sensor_msgs::Point
 		);
 	octomap::point3d observed;
 
-	for(auto&& point : transformed_pointcloud->points )
+	pointcloud->clear();
+
 	if(dist_map_created_) {
-		octomap::point3d map_point(point.x, point.y, point.z);
-		float dist(0);
-		distmap_->getDistanceAndClosestObstacle(map_point, dist, observed);
-		ROS_INFO("x: %f, y: %f, z: %f" , map_point.x(), map_point.y(), map_point.z());
-		//ROS_INFO("x: %f, y: %f, z: %f" , observed.x(), observed.y(), observed.z());
-    	ROS_INFO_STREAM("Closest point: " << dist);
-    	publishMap(oc_tree_);
+		auto start = high_resolution_clock::now();
+		for(auto&& point : transformed_pointcloud->points ){
+			octomap::point3d map_point(point.x, point.y, point.z);
+			float dist(distmap_->distanceValue_Error);
+			distmap_->getDistanceAndClosestObstacle(map_point, dist, observed);
+			//ROS_INFO("x: %f, y: %f, z: %f" , map_point.x(), map_point.y(), map_point.z());
+			//ROS_INFO("x: %f, y: %f, z: %f" , observed.x(), observed.y(), observed.z());
+			//ROS_INFO_STREAM("Closest point: " << dist);
+			//publishMap(oc_tree_);
+			if(dist != distmap_->distanceValue_Error && dist < distmap_->getMaxDist()){
+				pcl::PointXYZ p(observed.x(), observed.y(), observed.z());
+				pointcloud->push_back(p);
+			}
+		}
+		auto stop = high_resolution_clock::now();
+		auto duration = duration_cast<microseconds>(stop - start);
+
+		// To get the value of duration use the count()
+		// member function on the duration object
+		ROS_INFO("Processed %lu points in %li microseconds", transformed_pointcloud->points.size(),duration.count());
+
+		// Now, lets publish a pointcloud of points that matched up to the static map
+		//msg_out = *msg;
+
+		transformed_pointcloud->clear();
+		pcl_ros::transformPointCloud(*pointcloud, *transformed_pointcloud, fixed_to_base_tf2.inverse());
+		pcl::toROSMsg(*transformed_pointcloud, msg_out);
+		//msg_out.header = msg->header;
+		matching_pointcloud_pub_.publish(msg_out);
 	} else {
 		ROS_WARN_THROTTLE(10, "Distmap does not yet exist");
 	}
-
 
 }
 

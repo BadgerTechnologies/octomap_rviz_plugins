@@ -99,7 +99,7 @@ protected:
 
   DynamicEDTOctomap* distmap_ = nullptr;
 
-  ros::Publisher dist_octree_pub_;
+  ros::Publisher matching_pointcloud_pub_;
 
   u_int32_t queue_size_;
   uint32_t maps_received_;
