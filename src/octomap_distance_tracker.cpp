@@ -65,7 +65,7 @@ OctomapDistanceTracker::OctomapDistanceTracker(ros::NodeHandle private_nh_, ros:
   maps_received_(0),
   map_updates_received_(0),
   queue_size_(5),
-  octomap_topic_property_("/octomap/front_lidar/octomap_binary_updates"),
+  octomap_topic_property_("/octomap_binary"),
   base_frame_("base_link"),
   fixed_frame_("odom"),
   dist_map_created_(false)
@@ -74,7 +74,7 @@ OctomapDistanceTracker::OctomapDistanceTracker(ros::NodeHandle private_nh_, ros:
   private_nh.param("tracked_octomap_topic", octomap_topic_property_, octomap_topic_property_);
   map_sub_.subscribe(private_nh, octomap_topic_property_, queue_size_);
   map_sub_.registerCallback(boost::bind(&OctomapDistanceTracker::incomingMapCallback, this, _1));
-  pointcloud_sub_.subscribe(private_nh, "tophat/pointcloud", queue_size_);
+  pointcloud_sub_.subscribe(private_nh, "/scans/top/velodyne_points", queue_size_);
   pointcloud_sub_.registerCallback(boost::bind(&OctomapDistanceTracker::incomingPointcloudCallback, this, _1));
 
   tf_buffer_.reset(new tf2_ros::Buffer);
@@ -129,6 +129,7 @@ void OctomapDistanceTracker::incomingMapCallback(const octomap_msgs::OctomapCons
   delete distmap_;
   distmap_ = new DynamicEDTOctomap(maxDist, oc_tree_, min, max, false);
   distmap_->update();
+  dist_map_created_ = true;
   ROS_INFO("Message received and processed");
 }
 
@@ -167,12 +168,13 @@ void OctomapDistanceTracker::incomingPointcloudCallback(const sensor_msgs::Point
 		);
 	octomap::point3d observed;
 
+	for(auto&& point : transformed_pointcloud->points )
 	if(dist_map_created_) {
-		//distmap_->
+		octomap::point3d map_point(point.x, point.y, point.z);
 		float dist(0);
-		distmap_->getDistanceAndClosestObstacle(observer, dist, observed);
-		ROS_INFO("x: %f, y: %f, z: %f" , observer.x(), observer.y(), observer.z());
-		ROS_INFO("x: %f, y: %f, z: %f" , observed.x(), observed.y(), observed.z());
+		distmap_->getDistanceAndClosestObstacle(map_point, dist, observed);
+		ROS_INFO("x: %f, y: %f, z: %f" , map_point.x(), map_point.y(), map_point.z());
+		//ROS_INFO("x: %f, y: %f, z: %f" , observed.x(), observed.y(), observed.z());
     	ROS_INFO_STREAM("Closest point: " << dist);
     	publishMap(oc_tree_);
 	} else {
