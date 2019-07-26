@@ -114,6 +114,8 @@ void OctomapDistanceTracker::incomingMapCallback(const octomap_msgs::OctomapCons
 	return;
 	}
 
+	ROS_INFO("Map received, processing...");
+
 	// Update internal tree
 	oc_tree_ = update_bounds;
 
