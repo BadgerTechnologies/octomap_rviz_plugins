@@ -106,18 +106,18 @@ void OctomapDistanceTracker::incomingMapCallback(const octomap_msgs::OctomapCons
 	oc_tree_ = nullptr;
 
 	// Deserialize map data
-	octomap::OcTree* update_bounds = (octomap::OcTree*)octomap_msgs::msgToMap(*msg);
-	if (!update_bounds){
-	ROS_ERROR("Failed to deserialize octree message.");
-	// Delete memory before this exit point
-	delete update_bounds;
-	return;
+	octomap::OcTree* octree_msg_payload = (octomap::OcTree*)octomap_msgs::msgToMap(*msg);
+	if (!octree_msg_payload){
+		ROS_ERROR("Failed to deserialize octree message.");
+		// Delete memory before this exit point
+		delete octree_msg_payload;
+		return;
 	}
 
 	ROS_INFO("Map received, processing...");
 
 	// Update internal tree
-	oc_tree_ = update_bounds;
+	oc_tree_ = octree_msg_payload;
 
 	double x,y,z;
 	oc_tree_->getMetricMin(x,y,z);
@@ -126,7 +126,7 @@ void OctomapDistanceTracker::incomingMapCallback(const octomap_msgs::OctomapCons
 	oc_tree_->getMetricMax(x,y,z);
 	octomap::point3d max(x,y,z);
 	std::cout<<"Metric max: "<<x<<","<<y<<","<<z<<std::endl;
-	float maxDist = 1.0;
+	float maxDist = 0.2;
 
 	//- the first argument ist the max distance at which distance computations are clamped
 	//- the second argument is the octomap
@@ -137,6 +137,7 @@ void OctomapDistanceTracker::incomingMapCallback(const octomap_msgs::OctomapCons
 	delete distmap_;
 	distmap_ = new DynamicEDTOctomap(maxDist, oc_tree_, min, max, false);
 	distmap_->update();
+	distmap_->compressMap();
 	auto stop = high_resolution_clock::now();
 	auto duration = duration_cast<microseconds>(stop - start);
 	dist_map_created_ = true;
@@ -171,29 +172,25 @@ void OctomapDistanceTracker::incomingPointcloudCallback(const sensor_msgs::Point
 
     pcl_ros::transformPointCloud(*pointcloud, *transformed_pointcloud, fixed_to_base_tf2);
 
-	octomap::point3d observer(
-		//0,0,0.5f
-		fixed_to_base_tf.transform.translation.x,
-		fixed_to_base_tf.transform.translation.y,
-		0.5f
-		);
 	octomap::point3d observed;
 
 	pointcloud->clear();
 
 	if(dist_map_created_) {
+		long unsigned int num_points_matching = 0;
 		auto start = high_resolution_clock::now();
 		for(auto&& point : transformed_pointcloud->points ){
 			octomap::point3d map_point(point.x, point.y, point.z);
 			float dist(distmap_->distanceValue_Error);
-			distmap_->getDistanceAndClosestObstacle(map_point, dist, observed);
+			dist = distmap_->getDistance(map_point);
 			//ROS_INFO("x: %f, y: %f, z: %f" , map_point.x(), map_point.y(), map_point.z());
 			//ROS_INFO("x: %f, y: %f, z: %f" , observed.x(), observed.y(), observed.z());
 			//ROS_INFO_STREAM("Closest point: " << dist);
 			//publishMap(oc_tree_);
 			if(dist != distmap_->distanceValue_Error && dist < distmap_->getMaxDist()){
-				pcl::PointXYZ p(observed.x(), observed.y(), observed.z());
-				pointcloud->push_back(p);
+				num_points_matching++;
+//				pcl::PointXYZ p(observed.x(), observed.y(), observed.z());
+//				pointcloud->push_back(p);
 			}
 		}
 		auto stop = high_resolution_clock::now();
@@ -201,16 +198,17 @@ void OctomapDistanceTracker::incomingPointcloudCallback(const sensor_msgs::Point
 
 		// To get the value of duration use the count()
 		// member function on the duration object
-		ROS_INFO("Processed %lu points in %li microseconds", transformed_pointcloud->points.size(),duration.count());
+		ROS_INFO("Processed %lu points in %li microseconds", transformed_pointcloud->points.size(), duration.count());
+		ROS_INFO("%lu out of %lu points match the static 3d map", num_points_matching, transformed_pointcloud->points.size());
 
 		// Now, lets publish a pointcloud of points that matched up to the static map
 		//msg_out = *msg;
 
 		transformed_pointcloud->clear();
-		pcl_ros::transformPointCloud(*pointcloud, *transformed_pointcloud, fixed_to_base_tf2.inverse());
-		pcl::toROSMsg(*transformed_pointcloud, msg_out);
-		//msg_out.header = msg->header;
-		matching_pointcloud_pub_.publish(msg_out);
+//		pcl_ros::transformPointCloud(*pointcloud, *transformed_pointcloud, fixed_to_base_tf2.inverse());
+//		pcl::toROSMsg(*transformed_pointcloud, msg_out);
+//		//msg_out.header = msg->header;
+//		matching_pointcloud_pub_.publish(msg_out);
 	} else {
 		ROS_WARN_THROTTLE(10, "Distmap does not yet exist");
 	}
