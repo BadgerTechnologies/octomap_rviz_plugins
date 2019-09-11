@@ -26,13 +26,16 @@ catkin_package(
                                         
 
 include_directories(include 
+                    ${OCTOMAP_INCLUDE_DIRS}
                     ${catkin_INCLUDE_DIRS} 
                     ${Boost_INCLUDE_DIRS} 
-                    ${OCTOMAP_INCLUDE_DIRS})
+                    )
 
-link_directories(${catkin_LIBRARY_DIRS}
+link_directories(
+                 ${OCTOMAP_LIBRARY_DIRS}
+                 ${catkin_LIBRARY_DIRS}
                  ${Boost_LIBRARY_DIRS}
-                 ${OCTOMAP_LIBRARY_DIRS}) 
+                 )
 
 
 QT5_WRAP_CPP(MOC_FILES
