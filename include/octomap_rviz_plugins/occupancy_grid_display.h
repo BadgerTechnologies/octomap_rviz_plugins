@@ -37,12 +37,14 @@
 #include <ros/ros.h>
 
 #include <boost/shared_ptr.hpp>
-#include <boost/thread/mutex.hpp>
+#include <boost/thread/recursive_mutex.hpp>
 
 #include <message_filters/subscriber.h>
 
 #include <octomap_msgs/Octomap.h>
+#include <octomap_msgs/OctomapUpdate.h>
 
+#include <octomap/octomap.h>
 #include <octomap/OcTreeStamped.h>
 #include <octomap/ColorOcTree.h>
 
@@ -91,7 +93,8 @@ protected:
   void subscribe();
   void unsubscribe();
 
-  virtual void incomingMessageCallback(const octomap_msgs::OctomapConstPtr& msg) = 0;
+  virtual void incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg) = 0;
+  virtual void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg) = 0;
 
   void setColor( double z_pos, double min_z, double max_z, double color_factor, rviz::PointCloud::Point& point);
 
@@ -102,14 +105,17 @@ protected:
   typedef std::vector<rviz::PointCloud::Point> VPoint;
   typedef std::vector<VPoint> VVPoint;
 
-  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > sub_;
+  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > map_sub_;
+  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_;
 
-  boost::mutex mutex_;
+  boost::recursive_mutex mutex_;
 
   // point buffer
   VVPoint new_points_;
   VVPoint point_buf_;
   bool new_points_received_;
+  bool new_map_update_received_;
+  bool using_updates_;
 
   // Ogre-rviz point clouds
   std::vector<rviz::PointCloud*> cloud_;
@@ -127,14 +133,19 @@ protected:
   rviz::FloatProperty* min_height_property_;
 
   u_int32_t queue_size_;
-  uint32_t messages_received_;
+  uint32_t maps_received_;
+  uint32_t map_updates_received_;
   double color_factor_;
 };
 
 template <typename OcTreeType>
 class TemplatedOccupancyGridDisplay: public OccupancyGridDisplay {
 protected:
-  void incomingMessageCallback(const octomap_msgs::OctomapConstPtr& msg);
+  OcTreeType* oc_tree_ = nullptr;
+  ~TemplatedOccupancyGridDisplay();
+  void incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg);
+  void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg);
+  void updateNewPoints();
   void setVoxelColor(rviz::PointCloud::Point& newPoint, typename OcTreeType::NodeType& node, double minZ, double maxZ);
   ///Returns false, if the type_id (of the message) does not correspond to the template paramter
   ///of this class, true if correct or unknown (i.e., no specialized method for that template).
