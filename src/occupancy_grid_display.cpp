@@ -463,6 +463,7 @@ bool OccupancyGridDisplay::updateFromTF()
 
     scene_node_->setOrientation(orient);
     scene_node_->setPosition(pos);
+    scene_node_->needUpdate();
     return true;
 }
 
