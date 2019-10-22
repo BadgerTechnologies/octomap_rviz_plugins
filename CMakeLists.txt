@@ -17,11 +17,11 @@ set(PACKAGE_DEPENDENCIES
 
 
 find_package(catkin REQUIRED COMPONENTS ${PACKAGE_DEPENDENCIES})
-find_package(dynamicEDT3D REQUIRED)
 find_package(PCL REQUIRED QUIET COMPONENTS common sample_consensus io segmentation filters)
 
 find_package(OCTOMAP REQUIRED)
 add_definitions(-DOCTOMAP_NODEBUGOUT)
+find_package(dynamicEDT3D REQUIRED)
 
 include_directories(
   include

@@ -85,7 +85,7 @@ OctomapDistanceTracker::OctomapDistanceTracker(ros::NodeHandle private_nh_, ros:
   tf_buffer_.reset(new tf2_ros::Buffer);
   listener_.reset(new tf2_ros::TransformListener(*tf_buffer_));
 
-  matching_pointcloud_pub_ = private_nh.advertise<sensor_msgs::PointCloud2>("static_map_match", 1);
+  //matching_pointcloud_pub_ = private_nh.advertise<sensor_msgs::PointCloud2>("static_map_match", 1);
 
 
 }
@@ -133,15 +133,33 @@ void OctomapDistanceTracker::incomingMapCallback(const octomap_msgs::OctomapCons
 	//- arguments 3 and 4 can be used to restrict the distance map to a subarea
 	//- argument 5 defines whether unknown space is treated as occupied or free
 	//The constructor copies data but does not yet compute the distance map
+
+	// How long it takes to make the initial map
 	auto start = high_resolution_clock::now();
+	size_t compressed_size(0);
 	delete distmap_;
 	distmap_ = new DynamicEDTOctomap(maxDist, oc_tree_, min, max, false);
 	distmap_->update();
-	distmap_->compressMap();
 	auto stop = high_resolution_clock::now();
 	auto duration = duration_cast<microseconds>(stop - start);
+	ROS_INFO("Map message received and processed in %li seconds", duration.count()/1000000);
+
+
+//	// Compression into octree (currently must be done first)
+//	start = high_resolution_clock::now();
+//	compressed_size = distmap_->compressMaptoOctree();
+//	stop = high_resolution_clock::now();
+//	duration = duration_cast<microseconds>(stop - start);
+//	ROS_INFO("Compressed into octree in %li seconds to %li bytes.", duration.count()/1000000, compressed_size);
+
+	// Compression into hash table
+	start = high_resolution_clock::now();
+	compressed_size = distmap_->compressMap();
+	stop = high_resolution_clock::now();
+	duration = duration_cast<microseconds>(stop - start);
+	ROS_INFO("Compressed into hash table in %li seconds to %li bytes.", duration.count()/1000000, compressed_size);
+
 	dist_map_created_ = true;
-	ROS_INFO("Message received and processed in %li seconds", duration.count()/1000000);
 }
 
 void OctomapDistanceTracker::incomingPointcloudCallback(const sensor_msgs::PointCloud2ConstPtr& msg){
@@ -178,19 +196,15 @@ void OctomapDistanceTracker::incomingPointcloudCallback(const sensor_msgs::Point
 
 	if(dist_map_created_) {
 		long unsigned int num_points_matching = 0;
+
+		// Test performance of hash table storage
 		auto start = high_resolution_clock::now();
 		for(auto&& point : transformed_pointcloud->points ){
 			octomap::point3d map_point(point.x, point.y, point.z);
 			float dist(distmap_->distanceValue_Error);
 			dist = distmap_->getDistance(map_point);
-			//ROS_INFO("x: %f, y: %f, z: %f" , map_point.x(), map_point.y(), map_point.z());
-			//ROS_INFO("x: %f, y: %f, z: %f" , observed.x(), observed.y(), observed.z());
-			//ROS_INFO_STREAM("Closest point: " << dist);
-			//publishMap(oc_tree_);
 			if(dist != distmap_->distanceValue_Error && dist < distmap_->getMaxDist()){
 				num_points_matching++;
-//				pcl::PointXYZ p(observed.x(), observed.y(), observed.z());
-//				pointcloud->push_back(p);
 			}
 		}
 		auto stop = high_resolution_clock::now();
@@ -198,17 +212,29 @@ void OctomapDistanceTracker::incomingPointcloudCallback(const sensor_msgs::Point
 
 		// To get the value of duration use the count()
 		// member function on the duration object
-		ROS_INFO("Processed %lu points in %li microseconds", transformed_pointcloud->points.size(), duration.count());
-		ROS_INFO("%lu out of %lu points match the static 3d map", num_points_matching, transformed_pointcloud->points.size());
+		ROS_INFO("Hashtable: Processed %lu points in %li microseconds. %lu matched.",
+				transformed_pointcloud->points.size(), duration.count(), num_points_matching);
 
-		// Now, lets publish a pointcloud of points that matched up to the static map
-		//msg_out = *msg;
+//		// Test performance of octree storage
+//		num_points_matching = 0;
+//		start = high_resolution_clock::now();
+//		for(auto&& point : transformed_pointcloud->points ){
+//			octomap::point3d map_point(point.x, point.y, point.z);
+//			float dist(distmap_->distanceValue_Error);
+//			dist = distmap_->getDistancefromOctree(map_point);
+//			if(dist != distmap_->distanceValue_Error && dist < distmap_->getMaxDist()){
+//				num_points_matching++;
+//			}
+//		}
+//		stop = high_resolution_clock::now();
+//		duration = duration_cast<microseconds>(stop - start);
+//
+//		// To get the value of duration use the count()
+//		// member function on the duration object
+//		ROS_INFO("Octree: Processed %lu points in %li microseconds. %lu matched.",
+//				transformed_pointcloud->points.size(), duration.count(), num_points_matching);
 
 		transformed_pointcloud->clear();
-//		pcl_ros::transformPointCloud(*pointcloud, *transformed_pointcloud, fixed_to_base_tf2.inverse());
-//		pcl::toROSMsg(*transformed_pointcloud, msg_out);
-//		//msg_out.header = msg->header;
-//		matching_pointcloud_pub_.publish(msg_out);
 	} else {
 		ROS_WARN_THROTTLE(10, "Distmap does not yet exist");
 	}
