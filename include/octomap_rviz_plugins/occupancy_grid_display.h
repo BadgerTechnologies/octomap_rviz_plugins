@@ -137,6 +137,8 @@ protected:
   uint32_t maps_received_;
   uint32_t map_updates_received_;
   double color_factor_;
+  double min_probability_;
+  double max_probability_;
 };
 
 template <typename OcTreeType>
