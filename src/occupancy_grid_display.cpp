@@ -74,6 +74,7 @@ enum OctreeVoxelColorMode
   OCTOMAP_CELL_COLOR,
   OCTOMAP_Z_AXIS_COLOR,
   OCTOMAP_PROBABLILTY_COLOR,
+  OCTOMAP_RELATIVE_PROBABLILTY_COLOR,
 };
 
 OccupancyGridDisplay::OccupancyGridDisplay() :
@@ -119,7 +120,8 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
 
   octree_coloring_property_->addOption( "Cell Color",  OCTOMAP_CELL_COLOR );
   octree_coloring_property_->addOption( "Z-Axis",  OCTOMAP_Z_AXIS_COLOR );
-  octree_coloring_property_->addOption( "Cell Probability",  OCTOMAP_PROBABLILTY_COLOR );
+  octree_coloring_property_->addOption( "Cell Probability (Absolute)",  OCTOMAP_PROBABLILTY_COLOR );
+  octree_coloring_property_->addOption( "Cell Probability (Relative)",  OCTOMAP_RELATIVE_PROBABLILTY_COLOR );
   alpha_property_ = new rviz::FloatProperty( "Voxel Alpha", 1.0, "Set voxel transparency alpha",
                                              this, 
                                              SLOT( updateAlpha() ) );
@@ -455,6 +457,11 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::setVoxelColor(PointCloud::Point&
       cell_probability = node.getOccupancy();
       newPoint.setColor((1.0f-cell_probability), cell_probability, 0.0);
       break;
+    case OCTOMAP_RELATIVE_PROBABLILTY_COLOR:
+      cell_probability = node.getOccupancy();
+      cell_probability = (cell_probability - min_probability_) / (max_probability_ - min_probability_);
+      newPoint.setColor((1.0f-cell_probability), cell_probability, 0.0);
+      break;
     default:
       break;
   }
@@ -678,6 +685,15 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::updateNewPoints()
       double maxHeight = std::min<double>(max_height_property_->getFloat(), maxZ);
       double minHeight = std::max<double>(min_height_property_->getFloat(), minZ);
       int stepSize = 1 << (oc_tree_->getTreeDepth() - treeDepth); // for pruning of occluded voxels
+      // update probability limits
+      min_probability_ = 1.0;
+      max_probability_ = 0.0;
+      for (typename OcTreeType::iterator it = oc_tree_->begin(treeDepth), end = oc_tree_->end(); it != end; ++it)
+      {
+        double cell_probability = it->getOccupancy();
+        min_probability_ = std::min<double>(min_probability_, cell_probability);
+        max_probability_ = std::max<double>(max_probability_, cell_probability);
+      }
       for (typename OcTreeType::iterator it = oc_tree_->begin(treeDepth), end = oc_tree_->end(); it != end; ++it)
       {
         if(it.getZ() <= maxHeight && it.getZ() >= minHeight)
