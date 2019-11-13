@@ -520,10 +520,17 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
   // creating octree
   if (map_updates_received_ == 0)
   {
+    if (msg->octomap_bounds.header.seq == msg->octomap_update.header.seq)
+    {
+      // Due to a race in ROS publishing, a normal update was published
+      // before the SingleSubscriberPublisher's publish of the full map.
+      // Ignore the spurious update.
+      return;
+    }
     delete oc_tree_;
     oc_tree_ = nullptr;
   }
-  else if (update_last_seq_ && update_last_seq_ + 1 < msg->header.seq)
+  else if (update_last_seq_ && update_last_seq_ + 1 < msg->octomap_bounds.header.seq)
   {
     // A message was lost, leaving the updates out-of-sync.
     // Resubscribe to force a full map message.
@@ -533,7 +540,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
         octomap_topic_property_->getStdString() << "_updates");
     return;
   }
-  update_last_seq_ = msg->header.seq;
+  update_last_seq_ = msg->octomap_bounds.header.seq;
   map_updates_received_++;
   setStatus(StatusProperty::Ok, "Messages", QString::number(map_updates_received_) + " octomap updates received");
   setStatusStd(StatusProperty::Ok, "Type", msg->octomap_bounds.id.c_str());
