@@ -527,19 +527,12 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
       // Ignore the spurious update.
       return;
     }
+    // Go ahead and set last sequence to what it would have been.
+    // This way, if we do not handle this message, or any subsequent messages,
+    // it will be detected, and we will re-subscribe to get the full map again.
+    update_last_seq_ = msg->octomap_bounds.header.seq - 1;
     oc_tree_.reset();
   }
-  else if (update_last_seq_ && update_last_seq_ + 1 < msg->octomap_bounds.header.seq)
-  {
-    // A message was lost, leaving the updates out-of-sync.
-    // Resubscribe to force a full map message.
-    map_updates_received_ = 0;
-    update_sub_->subscribe();
-    ROS_INFO_STREAM("octomap update lost, resubscribing to " <<
-        octomap_topic_property_->getStdString() << "_updates");
-    return;
-  }
-  update_last_seq_ = msg->octomap_bounds.header.seq;
   map_updates_received_++;
   setStatus(StatusProperty::Ok, "Messages", QString::number(map_updates_received_) + " octomap updates received");
   setStatusStd(StatusProperty::Ok, "Type", msg->octomap_bounds.id.c_str());
@@ -577,6 +570,23 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
     setStatusStd(StatusProperty::Error, "Message", "Failed to deserialize octree message.");
     return;
   }
+
+  // Only update saved sequence after all the above error cases have been processed.
+  // This way, if we throw away an update message due to a TF error, for instance, we
+  // will resubscribe to get the whole map.
+  if (update_last_seq_ + 1 < msg->octomap_bounds.header.seq)
+  {
+    // A message was lost or discarded, leaving the updates out-of-sync.
+    // Resubscribe to force a full map message.
+    map_updates_received_ = 0;
+    update_sub_->subscribe();
+    setStatusStd(StatusProperty::Warn, "Message", "Octomap update message lost, resubscribing");
+    ROS_INFO_STREAM("octomap update lost, resubscribing to \""
+        << octomap_topic_property_->getStdString() << "_updates\", was expecting sequence "
+        << update_last_seq_ + 1 << " but got sequence " << msg->octomap_bounds.header.seq);
+    return;
+  }
+  update_last_seq_ = msg->octomap_bounds.header.seq;
 
   // Merge new tree into internal tree
   if(oc_tree_)
