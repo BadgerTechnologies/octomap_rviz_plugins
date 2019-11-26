@@ -638,12 +638,11 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
 
     // creating octree
     // Effectively deletes "tree"
-    delete oc_tree_;
-    oc_tree_ = nullptr;
-    octomap::AbstractOcTree* tree = octomap_msgs::msgToMap(*msg);
+    oc_tree_.reset();
+    boost::shared_ptr<octomap::AbstractOcTree> tree(octomap_msgs::msgToMap(*msg));
     if (tree)
     {
-      oc_tree_ = dynamic_cast<OcTreeType*>(tree);
+      oc_tree_ = boost::dynamic_pointer_cast<OcTreeType>(tree);
       if (!oc_tree_)
       {
         setStatusStd(StatusProperty::Error, "Message", "Wrong octomap type. Use a different display type.");
@@ -790,7 +789,6 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::updateNewPoints()
 
 template <typename OcTreeType>
 TemplatedOccupancyGridDisplay<OcTreeType>::~TemplatedOccupancyGridDisplay(){
-  delete oc_tree_;
 }
 
 
