@@ -527,8 +527,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
       // Ignore the spurious update.
       return;
     }
-    delete oc_tree_;
-    oc_tree_ = nullptr;
+    oc_tree_.reset();
   }
   else if (update_last_seq_ && update_last_seq_ + 1 < msg->octomap_bounds.header.seq)
   {
@@ -560,14 +559,14 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
   }
 
   // Get update data
-  OcTreeType* update_bounds = NULL;
-  OcTreeType* update_values = NULL;
-  octomap::AbstractOcTree* bounds_tree = octomap_msgs::msgToMap(msg->octomap_bounds);
-  octomap::AbstractOcTree* value_tree = octomap_msgs::msgToMap(msg->octomap_update);
+  boost::shared_ptr<OcTreeType> update_bounds;
+  boost::shared_ptr<OcTreeType> update_values;
+  boost::shared_ptr<octomap::AbstractOcTree> bounds_tree(octomap_msgs::msgToMap(msg->octomap_bounds));
+  boost::shared_ptr<octomap::AbstractOcTree> value_tree(octomap_msgs::msgToMap(msg->octomap_update));
   if (bounds_tree && value_tree)
   {
-    update_bounds = dynamic_cast<OcTreeType*>(bounds_tree);
-    update_values = dynamic_cast<OcTreeType*>(value_tree);
+    update_bounds = boost::dynamic_pointer_cast<OcTreeType>(bounds_tree);
+    update_values = boost::dynamic_pointer_cast<OcTreeType>(value_tree);
     if(!update_bounds || !update_values)
     {
       setStatusStd(StatusProperty::Error, "Message", "Wrong octomap_update type. Use a different display type.");
@@ -576,18 +575,13 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
   else
   {
     setStatusStd(StatusProperty::Error, "Message", "Failed to deserialize octree message.");
-    // Delete memory before this exit point
-    delete update_bounds;
-    delete update_values;
     return;
   }
 
   // Merge new tree into internal tree
   if(oc_tree_)
   {
-    oc_tree_->setTreeValues(update_values, update_bounds, false, true);
-    // Since we've stored the values, delete this copy
-    delete update_values;
+    oc_tree_->setTreeValues(update_values.get(), update_bounds.get(), false, true);
   }
   // If no tree exists, just fill it with our new values
   else
@@ -602,7 +596,6 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
     box_size_[i] = oc_tree_->getNodeSize(i + 1);
   }
 
-  delete update_bounds;
   new_map_update_received_ = true;
   setStatusStd(StatusProperty::Ok, "Message", "Message received and processed");
   updateNewPoints();
