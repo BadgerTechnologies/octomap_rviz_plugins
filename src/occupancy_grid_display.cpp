@@ -234,6 +234,7 @@ void OccupancyGridDisplay::subscribe()
     if (!updateTopicStr.empty())
     {
       using_updates_ = false;
+      first_full_map_update_received_ = false;
       map_updates_received_ = 0;
       update_sub_.reset(new message_filters::Subscriber<octomap_msgs::OctomapUpdate>());
 
@@ -518,22 +519,33 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
   boost::recursive_mutex::scoped_lock lock(mutex_);
   using_updates_ = true;
   // creating octree
-  if (map_updates_received_ == 0)
+  map_updates_received_++;
+  if (!first_full_map_update_received_)
   {
     if (msg->octomap_bounds.header.seq == msg->octomap_update.header.seq)
     {
-      // Due to a race in ROS publishing, a normal update was published
-      // before the SingleSubscriberPublisher's publish of the full map.
-      // Ignore the spurious update.
-      return;
+      if (map_updates_received_ <= 1)
+      {
+        // Due to a race in ROS publishing, a normal update was published
+        // before the SingleSubscriberPublisher's publish of the full map.
+        // Ignore the spurious update.
+        return;
+      }
+      else
+      {
+        // Somehow, the first full map was lost, resubscribe
+        update_sub_->subscribe();
+        ROS_INFO_STREAM("octomap first full update lost, resubscribing");
+        return;
+      }
     }
     // Go ahead and set last sequence to what it would have been.
     // This way, if we do not handle this message, or any subsequent messages,
     // it will be detected, and we will re-subscribe to get the full map again.
     update_last_seq_ = msg->octomap_bounds.header.seq - 1;
     oc_tree_.reset();
+    first_full_map_update_received_ = true;
   }
-  map_updates_received_++;
   setStatus(StatusProperty::Ok, "Messages", QString::number(map_updates_received_) + " octomap updates received");
   setStatusStd(StatusProperty::Ok, "Type", msg->octomap_bounds.id.c_str());
   if(!checkType(msg->octomap_bounds.id))
@@ -578,7 +590,6 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
   {
     // A message was lost or discarded, leaving the updates out-of-sync.
     // Resubscribe to force a full map message.
-    map_updates_received_ = 0;
     update_sub_->subscribe();
     setStatusStd(StatusProperty::Warn, "Message", "Octomap update message lost, resubscribing");
     ROS_INFO_STREAM("octomap update lost, resubscribing to \""

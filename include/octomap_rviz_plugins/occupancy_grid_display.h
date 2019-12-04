@@ -116,6 +116,7 @@ protected:
   bool new_points_received_;
   bool new_map_update_received_;
   bool using_updates_;
+  bool first_full_map_update_received_;
   unsigned int update_last_seq_;
 
   // Ogre-rviz point clouds
