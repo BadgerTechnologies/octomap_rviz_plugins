@@ -40,6 +40,7 @@
 #include <boost/thread/recursive_mutex.hpp>
 
 #include <message_filters/subscriber.h>
+#include <tf/message_filter.h>
 
 #include <octomap_msgs/Octomap.h>
 #include <octomap_msgs/OctomapUpdate.h>
@@ -89,8 +90,10 @@ protected:
   // overrides from Display
   virtual void onEnable();
   virtual void onDisable();
+  virtual void fixedFrameChanged();
 
   void subscribe();
+  void resubscribeUpdates();
   void unsubscribe();
 
   virtual void incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg) = 0;
@@ -107,6 +110,8 @@ protected:
 
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > map_sub_;
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_;
+  boost::shared_ptr<tf::MessageFilter<octomap_msgs::Octomap>> tf_map_sub_;
+  boost::shared_ptr<tf::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_;
 
   boost::recursive_mutex mutex_;
 

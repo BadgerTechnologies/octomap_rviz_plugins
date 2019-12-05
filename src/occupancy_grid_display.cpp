@@ -204,6 +204,15 @@ void OccupancyGridDisplay::onDisable()
   clear();
 }
 
+void OccupancyGridDisplay::fixedFrameChanged()
+{
+  boost::recursive_mutex::scoped_lock lock(mutex_);
+  if (tf_map_sub_)
+    tf_map_sub_->setTargetFrame(fixed_frame_.toStdString());
+  if (tf_update_sub_)
+    tf_update_sub_->setTargetFrame(fixed_frame_.toStdString());
+}
+
 void OccupancyGridDisplay::subscribe()
 {
   if (!isEnabled())
@@ -225,26 +234,48 @@ void OccupancyGridDisplay::subscribe()
       map_sub_.reset(new message_filters::Subscriber<octomap_msgs::Octomap>());
 
       map_sub_->subscribe(threaded_nh_, mapTopicStr, queue_size_);
-      map_sub_->registerCallback(boost::bind(&OccupancyGridDisplay::incomingMapMessageCallback, this, _1));
+      tf_map_sub_.reset(new tf::MessageFilter<octomap_msgs::Octomap>(
+            *context_->getTFClient(),
+            fixed_frame_.toStdString(),
+            queue_size_,
+            threaded_nh_));
+      tf_map_sub_->registerCallback(boost::bind(&OccupancyGridDisplay::incomingMapMessageCallback, this, _1));
+      tf_map_sub_->connectInput(*map_sub_);
+      context_->getFrameManager()->registerFilterForTransformStatusCheck(tf_map_sub_.get(), this);
     }
 
     // Try to subscribe to update topic
-    const std::string& updateTopicStr = octomap_topic_property_->getStdString();
-
-    if (!updateTopicStr.empty())
-    {
-      using_updates_ = false;
-      first_full_map_update_received_ = false;
-      map_updates_received_ = 0;
-      update_sub_.reset(new message_filters::Subscriber<octomap_msgs::OctomapUpdate>());
-
-      update_sub_->subscribe(threaded_nh_, updateTopicStr + "_updates", queue_size_);
-      update_sub_->registerCallback(boost::bind(&OccupancyGridDisplay::incomingUpdateMessageCallback, this, _1));
-    }
+    resubscribeUpdates();
   }
   catch (ros::Exception& e)
   {
     setStatus(StatusProperty::Error, "Topic", (std::string("Error subscribing: ") + e.what()).c_str());
+  }
+
+}
+
+void OccupancyGridDisplay::resubscribeUpdates()
+{
+  boost::recursive_mutex::scoped_lock lock(mutex_);
+  const std::string& updateTopicStr = octomap_topic_property_->getStdString();
+
+  if (!updateTopicStr.empty())
+  {
+    tf_update_sub_.reset();
+    using_updates_ = false;
+    first_full_map_update_received_ = false;
+    map_updates_received_ = 0;
+    update_sub_.reset(new message_filters::Subscriber<octomap_msgs::OctomapUpdate>());
+
+    update_sub_->subscribe(threaded_nh_, updateTopicStr + "_updates", queue_size_);
+    tf_update_sub_.reset(new tf::MessageFilter<octomap_msgs::OctomapUpdate>(
+          *context_->getTFClient(),
+          fixed_frame_.toStdString(),
+          queue_size_,
+          threaded_nh_));
+    tf_update_sub_->registerCallback(boost::bind(&OccupancyGridDisplay::incomingUpdateMessageCallback, this, _1));
+    tf_update_sub_->connectInput(*update_sub_);
+    context_->getFrameManager()->registerFilterForTransformStatusCheck(tf_update_sub_.get(), this);
   }
 
 }
@@ -255,6 +286,8 @@ void OccupancyGridDisplay::unsubscribe()
   // Local copy so destructor is called after mutex is released
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > map_sub_local_(map_sub_);
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_local_(update_sub_);
+  boost::shared_ptr<tf::MessageFilter<octomap_msgs::Octomap>> tf_map_sub_local_(tf_map_sub_);
+  boost::shared_ptr<tf::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_local_(tf_update_sub_);
 
   clear();
 
@@ -266,6 +299,8 @@ void OccupancyGridDisplay::unsubscribe()
   try
   {
     // reset filters
+    tf_map_sub_.reset();
+    tf_update_sub_.reset();
     map_sub_.reset();
     update_sub_.reset();
     using_updates_ = false;
@@ -278,6 +313,8 @@ void OccupancyGridDisplay::unsubscribe()
 
   lock.unlock();
   // Now that the lock is released, destroy the subscribers.
+  tf_map_sub_local_.reset();
+  tf_update_sub_local_.reset();
   map_sub_local_.reset();
   update_sub_local_.reset();
 }
@@ -534,8 +571,8 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
       else
       {
         // Somehow, the first full map was lost, resubscribe
-        update_sub_->subscribe();
         ROS_INFO_STREAM("octomap first full update lost, resubscribing");
+        resubscribeUpdates();
         return;
       }
     }
@@ -590,11 +627,11 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
   {
     // A message was lost or discarded, leaving the updates out-of-sync.
     // Resubscribe to force a full map message.
-    update_sub_->subscribe();
     setStatusStd(StatusProperty::Warn, "Message", "Octomap update message lost, resubscribing");
     ROS_INFO_STREAM("octomap update lost, resubscribing to \""
         << octomap_topic_property_->getStdString() << "_updates\", was expecting sequence "
         << update_last_seq_ + 1 << " but got sequence " << msg->octomap_bounds.header.seq);
+    resubscribeUpdates();
     return;
   }
   update_last_seq_ = msg->octomap_bounds.header.seq;
