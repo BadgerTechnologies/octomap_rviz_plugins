@@ -93,8 +93,10 @@ protected:
   virtual void fixedFrameChanged();
 
   void subscribe();
+  void subscribeUpdates();
   void resubscribeUpdates();
   void unsubscribe();
+  void scheduleResubscribeUpdates();
 
   virtual void incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg) = 0;
   virtual void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg) = 0;
@@ -112,6 +114,7 @@ protected:
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_;
   boost::shared_ptr<tf::MessageFilter<octomap_msgs::Octomap>> tf_map_sub_;
   boost::shared_ptr<tf::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_;
+  ros::Timer resub_timer_;
 
   boost::recursive_mutex mutex_;
 
