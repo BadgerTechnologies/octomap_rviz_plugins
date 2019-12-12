@@ -245,7 +245,7 @@ void OccupancyGridDisplay::subscribe()
     }
 
     // Try to subscribe to update topic
-    resubscribeUpdates();
+    subscribeUpdates();
   }
   catch (ros::Exception& e)
   {
@@ -254,7 +254,7 @@ void OccupancyGridDisplay::subscribe()
 
 }
 
-void OccupancyGridDisplay::resubscribeUpdates()
+void OccupancyGridDisplay::subscribeUpdates()
 {
   boost::recursive_mutex::scoped_lock lock(mutex_);
   const std::string& updateTopicStr = octomap_topic_property_->getStdString();
@@ -277,24 +277,57 @@ void OccupancyGridDisplay::resubscribeUpdates()
     tf_update_sub_->connectInput(*update_sub_);
     context_->getFrameManager()->registerFilterForTransformStatusCheck(tf_update_sub_.get(), this);
   }
+}
 
+void OccupancyGridDisplay::scheduleResubscribeUpdates()
+{
+  // We can't clear the tf message filter inside the tf message filter
+  // callback due to a sloppy locking architecture, so schedule resubscribing
+  // on a one-shot timer that fires immediately.
+  resub_timer_ = threaded_nh_.createTimer(
+      ros::Duration(0.0),
+      boost::bind(&OccupancyGridDisplay::resubscribeUpdates, this),
+      true);
+}
+
+void OccupancyGridDisplay::resubscribeUpdates()
+{
+  boost::unique_lock<boost::recursive_mutex> lock(mutex_);
+  // It isn't safe to hold our lock and then call tf_update_sub_ clear, as it
+  // grabs the lock that is held during our tf message filter callback. Fix
+  // this by getting a local copy of the shared ptr with the lock, dropping our
+  // lock and then resubscribing.
+  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_local(update_sub_);
+  boost::shared_ptr<tf::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_local(tf_update_sub_);
+
+  first_full_map_update_received_ = false;
+  map_updates_received_ = 0;
+
+  lock.unlock();
+
+  // There is a race where we might get callbacks here before re-subscribing,
+  // which might cause us to schedule another resubscribe. The race window is
+  // short, so the probability of getting multiple resubscribes is very low,
+  // but not zero. The TF message filter design should really be improved to
+  // not hold locks while calling our callback so we can avoid this race.
+  if (update_sub_local)
+    update_sub_local->subscribe();
+  if (tf_update_sub_local)
+    tf_update_sub_local->clear();
 }
 
 void OccupancyGridDisplay::unsubscribe()
 {
   boost::unique_lock<boost::recursive_mutex> lock(mutex_);
-  // Local copy so destructor is called after mutex is released
-  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > map_sub_local_(map_sub_);
-  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_local_(update_sub_);
-  boost::shared_ptr<tf::MessageFilter<octomap_msgs::Octomap>> tf_map_sub_local_(tf_map_sub_);
-  boost::shared_ptr<tf::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_local_(tf_update_sub_);
+  // Local copy to use after dropping the lock. We can not manipulate the
+  // message filters safely with our lock held as they hold locks when calling
+  // our callbacks.
+  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > map_sub_local(map_sub_);
+  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_local(update_sub_);
+  boost::shared_ptr<tf::MessageFilter<octomap_msgs::Octomap>> tf_map_sub_local(tf_map_sub_);
+  boost::shared_ptr<tf::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_local(tf_update_sub_);
 
   clear();
-
-  if (map_sub_)
-    map_sub_->unsubscribe();
-  if (update_sub_)
-    update_sub_->unsubscribe();
 
   try
   {
@@ -312,11 +345,14 @@ void OccupancyGridDisplay::unsubscribe()
   }
 
   lock.unlock();
+
   // Now that the lock is released, destroy the subscribers.
-  tf_map_sub_local_.reset();
-  tf_update_sub_local_.reset();
-  map_sub_local_.reset();
-  update_sub_local_.reset();
+  // This would happen implicitly when the shared pointers go out of scope
+  // below, but make it explicit for clarity.
+  tf_map_sub_local.reset();
+  tf_update_sub_local.reset();
+  map_sub_local.reset();
+  update_sub_local.reset();
 }
 
 // method taken from octomap_server package
@@ -572,7 +608,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
       {
         // Somehow, the first full map was lost, resubscribe
         ROS_INFO_STREAM("octomap first full update lost, resubscribing");
-        resubscribeUpdates();
+        scheduleResubscribeUpdates();
         return;
       }
     }
@@ -631,7 +667,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
     ROS_INFO_STREAM("octomap update lost, resubscribing to \""
         << octomap_topic_property_->getStdString() << "_updates\", was expecting sequence "
         << update_last_seq_ + 1 << " but got sequence " << msg->octomap_bounds.header.seq);
-    resubscribeUpdates();
+    scheduleResubscribeUpdates();
     return;
   }
   update_last_seq_ = msg->octomap_bounds.header.seq;
