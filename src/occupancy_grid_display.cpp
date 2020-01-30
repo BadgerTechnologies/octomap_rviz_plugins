@@ -648,6 +648,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
     if(!update_bounds || !update_values)
     {
       setStatusStd(StatusProperty::Error, "Message", "Wrong octomap_update type. Use a different display type.");
+      return;
     }
   }
   else
