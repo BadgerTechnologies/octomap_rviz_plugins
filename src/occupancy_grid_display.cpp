@@ -61,7 +61,7 @@ using namespace rviz;
 namespace octomap_rviz_plugin
 {
 
-static const std::size_t max_octree_depth_ = sizeof(unsigned short) * 8;
+static const std::size_t max_octree_depth_ = octomap::KEY_BIT_WIDTH;
 
 enum OctreeVoxelRenderMode
 {
