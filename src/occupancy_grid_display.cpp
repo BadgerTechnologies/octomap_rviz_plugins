@@ -447,9 +447,9 @@ void OccupancyGridDisplay::clear()
 
 void OccupancyGridDisplay::update(float wall_dt, float ros_dt)
 {
+  boost::unique_lock<boost::recursive_mutex> lock(mutex_);
   if (new_points_received_)
   {
-    boost::recursive_mutex::scoped_lock lock(mutex_);
 
     for (size_t i = 0; i < max_octree_depth_; ++i)
     {
@@ -466,6 +466,7 @@ void OccupancyGridDisplay::update(float wall_dt, float ros_dt)
     new_map_update_received_ = false;
   }
   updateFromTF();
+  lock.unlock();
   context_->queueRender();
 }
 
