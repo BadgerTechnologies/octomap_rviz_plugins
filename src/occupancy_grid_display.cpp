@@ -629,13 +629,6 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
   }
 
   header_ = msg->header;
-  if (!updateFromTF()) {
-      std::stringstream ss;
-      ss << "Failed to transform from frame [" << header_.frame_id << "] to frame ["
-          << context_->getFrameManager()->getFixedFrame() << "]";
-      setStatusStd(StatusProperty::Error, "Message", ss.str());
-      return;
-  }
 
   // Get update data
   boost::shared_ptr<OcTreeType> update_bounds;
@@ -716,14 +709,6 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
     ROS_DEBUG("Received OctomapBinary message (size: %d bytes)", (int)msg->data.size());
 
     header_ = msg->header;
-    if (!updateFromTF())
-    {
-      std::stringstream ss;
-      ss << "Failed to transform from frame [" << header_.frame_id << "] to frame ["
-         << context_->getFrameManager()->getFixedFrame() << "]";
-      setStatusStd(StatusProperty::Error, "Message", ss.str());
-      return;
-    }
 
     // creating octree
     // Effectively deletes "tree"
