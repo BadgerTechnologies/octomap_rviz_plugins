@@ -34,6 +34,8 @@
 #define RVIZ_OCCUPANCY_GRID_DISPLAY_H
 
 #ifndef Q_MOC_RUN 
+#include <type_traits>
+
 #include <ros/ros.h>
 
 #include <boost/shared_ptr.hpp>
@@ -50,6 +52,7 @@
 #include <octomap/ColorOcTree.h>
 
 #include <rviz/display.h>
+#include <rviz/display_context.h>
 #include "rviz/ogre_helpers/point_cloud.h"
 
 #endif
@@ -63,6 +66,83 @@ class FloatProperty;
 
 namespace octomap_rviz_plugin
 {
+
+// Everything in rviz_tf_api_fixup can be removed once there is no longer any
+// need to be backwards compatible
+namespace rviz_tf_api_fixup
+{
+
+template<typename> struct type_sink { typedef void type; }; // consumes a type, and makes it `void`
+template<typename T> using type_sink_t = typename type_sink<T>::type;
+
+template<typename T, typename=void> struct has_get_tf2_buffer_ptr : std::false_type {};
+template<typename T> struct has_get_tf2_buffer_ptr<
+  T,
+  type_sink_t< decltype( std::declval<T>().getTF2BufferPtr() ) >
+> : std::true_type {};
+
+template <typename M, typename Context, typename Enabler = void>
+class DisplayContextTFMessageFilterWrapper
+{
+};
+
+template <typename M, typename Context>
+class DisplayContextTFMessageFilterWrapper<M, Context, typename std::enable_if<has_get_tf2_buffer_ptr<Context>::value>::type>
+{
+  using FilterType = tf2_ros::MessageFilter<M>;
+  using FilterPtr = std::shared_ptr<FilterType>;
+public:
+  void reset(Context* context, std::string frame_id, uint32_t queue_size, ros::NodeHandle nh)
+  {
+    filter_ptr_ = std::make_shared<FilterType>(
+        *context->getTF2BufferPtr(),
+	frame_id,
+	queue_size,
+	nh);
+  }
+
+  void reset()
+  {
+    filter_ptr_.reset();
+  }
+
+  FilterPtr getFilter() { return filter_ptr_; }
+
+  void setTargetFrame(std::string frame_id) { if (filter_ptr_) filter_ptr_->setTargetFrame(frame_id); }
+
+private:
+  FilterPtr filter_ptr_;
+};
+
+template <typename M, typename Context>
+class DisplayContextTFMessageFilterWrapper<M, Context, typename std::enable_if<!has_get_tf2_buffer_ptr<Context>::value>::type>
+{
+  using FilterType = tf::MessageFilter<M>;
+  using FilterPtr = std::shared_ptr<FilterType>;
+public:
+  void reset(Context* context, std::string frame_id, uint32_t queue_size, ros::NodeHandle nh)
+  {
+    filter_ptr_ = std::make_shared<FilterType>(
+        *context->getTFClient(),
+	frame_id,
+	queue_size,
+	nh);
+  }
+
+  void reset()
+  {
+    filter_ptr_.reset();
+  }
+
+  FilterPtr getFilter() { return filter_ptr_; }
+
+  void setTargetFrame(std::string frame_id) { if (filter_ptr_) filter_ptr_->setTargetFrame(frame_id); }
+
+private:
+  FilterPtr filter_ptr_;
+};
+
+}  // namespace rviz_tf_api_fixup
 
 class OccupancyGridDisplay : public rviz::Display
 {
@@ -112,8 +192,8 @@ protected:
 
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > map_sub_;
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_;
-  boost::shared_ptr<tf::MessageFilter<octomap_msgs::Octomap>> tf_map_sub_;
-  boost::shared_ptr<tf::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_;
+  rviz_tf_api_fixup::DisplayContextTFMessageFilterWrapper<octomap_msgs::Octomap, rviz::DisplayContext> tf_map_sub_wrapper_;
+  rviz_tf_api_fixup::DisplayContextTFMessageFilterWrapper<octomap_msgs::OctomapUpdate, rviz::DisplayContext> tf_update_sub_wrapper_;
   ros::Timer resub_timer_;
 
   boost::recursive_mutex mutex_;

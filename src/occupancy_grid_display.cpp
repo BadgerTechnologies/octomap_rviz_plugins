@@ -207,10 +207,8 @@ void OccupancyGridDisplay::onDisable()
 void OccupancyGridDisplay::fixedFrameChanged()
 {
   boost::recursive_mutex::scoped_lock lock(mutex_);
-  if (tf_map_sub_)
-    tf_map_sub_->setTargetFrame(fixed_frame_.toStdString());
-  if (tf_update_sub_)
-    tf_update_sub_->setTargetFrame(fixed_frame_.toStdString());
+  tf_map_sub_wrapper_.setTargetFrame(fixed_frame_.toStdString());
+  tf_update_sub_wrapper_.setTargetFrame(fixed_frame_.toStdString());
 }
 
 void OccupancyGridDisplay::subscribe()
@@ -234,11 +232,12 @@ void OccupancyGridDisplay::subscribe()
       map_sub_.reset(new message_filters::Subscriber<octomap_msgs::Octomap>());
 
       map_sub_->subscribe(threaded_nh_, mapTopicStr, queue_size_);
-      tf_map_sub_.reset(new tf::MessageFilter<octomap_msgs::Octomap>(
-            *context_->getTFClient(),
+      tf_map_sub_wrapper_.reset(
+	    context_,
             fixed_frame_.toStdString(),
             queue_size_,
-            threaded_nh_));
+            threaded_nh_);
+      auto tf_map_sub_ = tf_map_sub_wrapper_.getFilter();
       tf_map_sub_->registerCallback(boost::bind(&OccupancyGridDisplay::incomingMapMessageCallback, this, _1));
       tf_map_sub_->connectInput(*map_sub_);
       context_->getFrameManager()->registerFilterForTransformStatusCheck(tf_map_sub_.get(), this);
@@ -261,18 +260,19 @@ void OccupancyGridDisplay::subscribeUpdates()
 
   if (!updateTopicStr.empty())
   {
-    tf_update_sub_.reset();
+    tf_update_sub_wrapper_.reset();
     using_updates_ = false;
     first_full_map_update_received_ = false;
     map_updates_received_ = 0;
     update_sub_.reset(new message_filters::Subscriber<octomap_msgs::OctomapUpdate>());
 
     update_sub_->subscribe(threaded_nh_, updateTopicStr + "_updates", queue_size_);
-    tf_update_sub_.reset(new tf::MessageFilter<octomap_msgs::OctomapUpdate>(
-          *context_->getTFClient(),
+    tf_update_sub_wrapper_.reset(
+          context_,
           fixed_frame_.toStdString(),
           queue_size_,
-          threaded_nh_));
+          threaded_nh_);
+    auto tf_update_sub_ = tf_update_sub_wrapper_.getFilter();
     tf_update_sub_->registerCallback(boost::bind(&OccupancyGridDisplay::incomingUpdateMessageCallback, this, _1));
     tf_update_sub_->connectInput(*update_sub_);
     context_->getFrameManager()->registerFilterForTransformStatusCheck(tf_update_sub_.get(), this);
@@ -298,7 +298,7 @@ void OccupancyGridDisplay::resubscribeUpdates()
   // this by getting a local copy of the shared ptr with the lock, dropping our
   // lock and then resubscribing.
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_local(update_sub_);
-  boost::shared_ptr<tf::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_local(tf_update_sub_);
+  auto tf_update_sub_local = tf_update_sub_wrapper_.getFilter();
 
   first_full_map_update_received_ = false;
   map_updates_received_ = 0;
@@ -324,16 +324,16 @@ void OccupancyGridDisplay::unsubscribe()
   // our callbacks.
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > map_sub_local(map_sub_);
   boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_local(update_sub_);
-  boost::shared_ptr<tf::MessageFilter<octomap_msgs::Octomap>> tf_map_sub_local(tf_map_sub_);
-  boost::shared_ptr<tf::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_local(tf_update_sub_);
+  auto tf_map_sub_local = tf_map_sub_wrapper_.getFilter();
+  auto tf_update_sub_local = tf_update_sub_wrapper_.getFilter();
 
   clear();
 
   try
   {
     // reset filters
-    tf_map_sub_.reset();
-    tf_update_sub_.reset();
+    tf_map_sub_wrapper_.reset();
+    tf_update_sub_wrapper_.reset();
     map_sub_.reset();
     update_sub_.reset();
     using_updates_ = false;
