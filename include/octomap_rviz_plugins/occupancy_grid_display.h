@@ -36,11 +36,11 @@
 #ifndef Q_MOC_RUN 
 #include <ros/ros.h>
 
-#include <boost/shared_ptr.hpp>
-#include <boost/thread/recursive_mutex.hpp>
+#include <memory>
+#include <mutex>
 
 #include <message_filters/subscriber.h>
-#include <tf/message_filter.h>
+#include <tf2_ros/message_filter.h>
 
 #include <octomap_msgs/Octomap.h>
 #include <octomap_msgs/OctomapUpdate.h>
@@ -110,13 +110,13 @@ protected:
   typedef std::vector<rviz::PointCloud::Point> VPoint;
   typedef std::vector<VPoint> VVPoint;
 
-  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > map_sub_;
-  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_;
-  boost::shared_ptr<tf::MessageFilter<octomap_msgs::Octomap>> tf_map_sub_;
-  boost::shared_ptr<tf::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_;
+  std::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > map_sub_;
+  std::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_;
+  std::shared_ptr<tf2_ros::MessageFilter<octomap_msgs::Octomap>> tf_map_sub_;
+  std::shared_ptr<tf2_ros::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_;
   ros::Timer resub_timer_;
 
-  boost::recursive_mutex mutex_;
+  std::recursive_mutex mutex_;
 
   // point buffer
   VVPoint new_points_;
@@ -153,7 +153,7 @@ protected:
 template <typename OcTreeType>
 class TemplatedOccupancyGridDisplay: public OccupancyGridDisplay {
 protected:
-  boost::shared_ptr<OcTreeType> oc_tree_;
+  std::shared_ptr<OcTreeType> oc_tree_;
   ~TemplatedOccupancyGridDisplay();
   void incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg);
   void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg);

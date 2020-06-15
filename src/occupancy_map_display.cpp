@@ -33,6 +33,8 @@
 
 #include "octomap_rviz_plugins/occupancy_map_display.h"
 
+#include <functional>
+
 #include "rviz/visualization_manager.h"
 #include "rviz/properties/int_property.h"
 #include "rviz/properties/ros_topic_property.h"
@@ -106,7 +108,7 @@ void OccupancyMapDisplay::subscribe()
       sub_.reset(new message_filters::Subscriber<octomap_msgs::Octomap>());
 
       sub_->subscribe(threaded_nh_, topicStr, 5);
-      sub_->registerCallback(boost::bind(&OccupancyMapDisplay::handleOctomapBinaryMessage, this, _1));
+      sub_->registerCallback(std::bind(&OccupancyMapDisplay::handleOctomapBinaryMessage, this, std::placeholders::_1));
 
     }
   }

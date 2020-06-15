@@ -37,6 +37,8 @@
 
 #include <qobject.h>
 
+#include <memory>
+
 #include <ros/ros.h>
 
 #include "rviz/default_plugin/map_display.h"
@@ -70,7 +72,7 @@ protected:
 
   virtual void handleOctomapBinaryMessage(const octomap_msgs::OctomapConstPtr& msg) = 0;
 
-  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > sub_;
+  std::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > sub_;
 
   unsigned int octree_depth_;
   rviz::IntProperty* tree_depth_property_;

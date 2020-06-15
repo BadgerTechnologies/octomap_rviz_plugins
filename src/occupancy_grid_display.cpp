@@ -31,10 +31,9 @@
  */
 #include <QObject>
 
-#include "octomap_rviz_plugins/occupancy_grid_display.h"
+#include <functional>
 
-#include <boost/bind.hpp>
-#include <boost/shared_ptr.hpp>
+#include "octomap_rviz_plugins/occupancy_grid_display.h"
 
 #include <OGRE/OgreSceneNode.h>
 #include <OGRE/OgreSceneManager.h>
@@ -150,7 +149,7 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
 
 void OccupancyGridDisplay::onInitialize()
 {
-  boost::recursive_mutex::scoped_lock lock(mutex_);
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
 
   box_size_.resize(max_octree_depth_);
   cloud_.resize(max_octree_depth_);
@@ -206,7 +205,7 @@ void OccupancyGridDisplay::onDisable()
 
 void OccupancyGridDisplay::fixedFrameChanged()
 {
-  boost::recursive_mutex::scoped_lock lock(mutex_);
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (tf_map_sub_)
     tf_map_sub_->setTargetFrame(fixed_frame_.toStdString());
   if (tf_update_sub_)
@@ -224,7 +223,7 @@ void OccupancyGridDisplay::subscribe()
   {
     unsubscribe();
 
-    boost::recursive_mutex::scoped_lock lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     // Subscribe to map topic
     const std::string& mapTopicStr = octomap_topic_property_->getStdString();
@@ -234,12 +233,12 @@ void OccupancyGridDisplay::subscribe()
       map_sub_.reset(new message_filters::Subscriber<octomap_msgs::Octomap>());
 
       map_sub_->subscribe(threaded_nh_, mapTopicStr, queue_size_);
-      tf_map_sub_.reset(new tf::MessageFilter<octomap_msgs::Octomap>(
-            *context_->getTFClient(),
+      tf_map_sub_.reset(new tf2_ros::MessageFilter<octomap_msgs::Octomap>(
+            *context_->getTF2BufferPtr(),
             fixed_frame_.toStdString(),
             queue_size_,
             threaded_nh_));
-      tf_map_sub_->registerCallback(boost::bind(&OccupancyGridDisplay::incomingMapMessageCallback, this, _1));
+      tf_map_sub_->registerCallback(std::bind(&OccupancyGridDisplay::incomingMapMessageCallback, this, std::placeholders::_1));
       tf_map_sub_->connectInput(*map_sub_);
       context_->getFrameManager()->registerFilterForTransformStatusCheck(tf_map_sub_.get(), this);
     }
@@ -256,7 +255,7 @@ void OccupancyGridDisplay::subscribe()
 
 void OccupancyGridDisplay::subscribeUpdates()
 {
-  boost::recursive_mutex::scoped_lock lock(mutex_);
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   const std::string& updateTopicStr = octomap_topic_property_->getStdString();
 
   if (!updateTopicStr.empty())
@@ -268,12 +267,12 @@ void OccupancyGridDisplay::subscribeUpdates()
     update_sub_.reset(new message_filters::Subscriber<octomap_msgs::OctomapUpdate>());
 
     update_sub_->subscribe(threaded_nh_, updateTopicStr + "_updates", queue_size_);
-    tf_update_sub_.reset(new tf::MessageFilter<octomap_msgs::OctomapUpdate>(
-          *context_->getTFClient(),
+    tf_update_sub_.reset(new tf2_ros::MessageFilter<octomap_msgs::OctomapUpdate>(
+          *context_->getTF2BufferPtr(),
           fixed_frame_.toStdString(),
           queue_size_,
           threaded_nh_));
-    tf_update_sub_->registerCallback(boost::bind(&OccupancyGridDisplay::incomingUpdateMessageCallback, this, _1));
+    tf_update_sub_->registerCallback(std::bind(&OccupancyGridDisplay::incomingUpdateMessageCallback, this, std::placeholders::_1));
     tf_update_sub_->connectInput(*update_sub_);
     context_->getFrameManager()->registerFilterForTransformStatusCheck(tf_update_sub_.get(), this);
   }
@@ -286,19 +285,19 @@ void OccupancyGridDisplay::scheduleResubscribeUpdates()
   // on a one-shot timer that fires immediately.
   resub_timer_ = threaded_nh_.createTimer(
       ros::Duration(0.0),
-      boost::bind(&OccupancyGridDisplay::resubscribeUpdates, this),
+      std::bind(&OccupancyGridDisplay::resubscribeUpdates, this),
       true);
 }
 
 void OccupancyGridDisplay::resubscribeUpdates()
 {
-  boost::unique_lock<boost::recursive_mutex> lock(mutex_);
+  std::unique_lock<std::recursive_mutex> lock(mutex_);
   // It isn't safe to hold our lock and then call tf_update_sub_ clear, as it
   // grabs the lock that is held during our tf message filter callback. Fix
   // this by getting a local copy of the shared ptr with the lock, dropping our
   // lock and then resubscribing.
-  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_local(update_sub_);
-  boost::shared_ptr<tf::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_local(tf_update_sub_);
+  std::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate>> update_sub_local(update_sub_);
+  std::shared_ptr<tf2_ros::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_local(tf_update_sub_);
 
   first_full_map_update_received_ = false;
   map_updates_received_ = 0;
@@ -318,14 +317,14 @@ void OccupancyGridDisplay::resubscribeUpdates()
 
 void OccupancyGridDisplay::unsubscribe()
 {
-  boost::unique_lock<boost::recursive_mutex> lock(mutex_);
+  std::unique_lock<std::recursive_mutex> lock(mutex_);
   // Local copy to use after dropping the lock. We can not manipulate the
   // message filters safely with our lock held as they hold locks when calling
   // our callbacks.
-  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap> > map_sub_local(map_sub_);
-  boost::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate> > update_sub_local(update_sub_);
-  boost::shared_ptr<tf::MessageFilter<octomap_msgs::Octomap>> tf_map_sub_local(tf_map_sub_);
-  boost::shared_ptr<tf::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_local(tf_update_sub_);
+  std::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap>> map_sub_local(map_sub_);
+  std::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate>> update_sub_local(update_sub_);
+  std::shared_ptr<tf2_ros::MessageFilter<octomap_msgs::Octomap>> tf_map_sub_local(tf_map_sub_);
+  std::shared_ptr<tf2_ros::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_local(tf_update_sub_);
 
   clear();
 
@@ -435,8 +434,7 @@ void OccupancyGridDisplay::updateMinHeight()
 
 void OccupancyGridDisplay::clear()
 {
-
-  boost::recursive_mutex::scoped_lock lock(mutex_);
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
 
   // reset rviz pointcloud boxes
   for (size_t i = 0; i < cloud_.size(); ++i)
@@ -447,7 +445,7 @@ void OccupancyGridDisplay::clear()
 
 void OccupancyGridDisplay::update(float wall_dt, float ros_dt)
 {
-  boost::unique_lock<boost::recursive_mutex> lock(mutex_);
+  std::unique_lock<std::recursive_mutex> lock(mutex_);
   if (new_points_received_)
   {
 
@@ -590,7 +588,7 @@ bool OccupancyGridDisplay::updateFromTF()
 template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg)
 {
-  boost::recursive_mutex::scoped_lock lock(mutex_);
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   using_updates_ = true;
   // creating octree
   map_updates_received_++;
@@ -631,14 +629,14 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
   header_ = msg->header;
 
   // Get update data
-  boost::shared_ptr<OcTreeType> update_bounds;
-  boost::shared_ptr<OcTreeType> update_values;
-  boost::shared_ptr<octomap::AbstractOcTree> bounds_tree(octomap_msgs::msgToMap(msg->octomap_bounds));
-  boost::shared_ptr<octomap::AbstractOcTree> value_tree(octomap_msgs::msgToMap(msg->octomap_update));
+  std::shared_ptr<OcTreeType> update_bounds;
+  std::shared_ptr<OcTreeType> update_values;
+  std::shared_ptr<octomap::AbstractOcTree> bounds_tree(octomap_msgs::msgToMap(msg->octomap_bounds));
+  std::shared_ptr<octomap::AbstractOcTree> value_tree(octomap_msgs::msgToMap(msg->octomap_update));
   if (bounds_tree && value_tree)
   {
-    update_bounds = boost::dynamic_pointer_cast<OcTreeType>(bounds_tree);
-    update_values = boost::dynamic_pointer_cast<OcTreeType>(value_tree);
+    update_bounds = std::dynamic_pointer_cast<OcTreeType>(bounds_tree);
+    update_values = std::dynamic_pointer_cast<OcTreeType>(value_tree);
     if(!update_bounds || !update_values)
     {
       setStatusStd(StatusProperty::Error, "Message", "Wrong octomap_update type. Use a different display type.");
@@ -693,7 +691,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
 template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg)
 {
-  boost::recursive_mutex::scoped_lock lock(mutex_);
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   if(!using_updates_)
   {
     ++maps_received_;
@@ -713,10 +711,10 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
     // creating octree
     // Effectively deletes "tree"
     oc_tree_.reset();
-    boost::shared_ptr<octomap::AbstractOcTree> tree(octomap_msgs::msgToMap(*msg));
+    std::shared_ptr<octomap::AbstractOcTree> tree(octomap_msgs::msgToMap(*msg));
     if (tree)
     {
-      oc_tree_ = boost::dynamic_pointer_cast<OcTreeType>(tree);
+      oc_tree_ = std::dynamic_pointer_cast<OcTreeType>(tree);
       if (!oc_tree_)
       {
         setStatusStd(StatusProperty::Error, "Message", "Wrong octomap type. Use a different display type.");
@@ -748,7 +746,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
 template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::updateNewPoints()
 {
-  boost::recursive_mutex::scoped_lock lock(mutex_);
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   if(oc_tree_)
   {
     tree_depth_property_->setMax(oc_tree_->getTreeDepth());

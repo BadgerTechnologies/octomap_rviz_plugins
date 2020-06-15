@@ -4,7 +4,7 @@ set(CMAKE_CXX_STANDARD 11)
 
 find_package(catkin REQUIRED COMPONENTS octomap_msgs
                                         roscpp
-                                        tf
+                                        tf2_ros
                                         rviz
                                         
 )
@@ -24,7 +24,7 @@ catkin_package(
     LIBRARIES ${PROJECT_NAME}
     CATKIN_DEPENDS octomap_msgs
                    roscpp
-                   tf
+                   tf2_ros
                    rviz
     DEPENDS OCTOMAP
 )
