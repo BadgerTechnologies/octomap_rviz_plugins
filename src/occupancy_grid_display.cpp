@@ -80,6 +80,7 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
     rviz::Display(),
     new_points_received_(false),
     new_map_update_received_(false),
+    resubscribe_on_lost_update_(true),
     using_updates_(false),
     maps_received_(0),
     map_updates_received_(0),
@@ -102,6 +103,16 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
                                           this,
                                           SLOT( updateQueueSize() ));
   queue_size_property_->setMin(1);
+
+  resubscribe_on_lost_update_property_ =
+    new rviz::BoolProperty( "Resubscribe on Lost Update",
+                            resubscribe_on_lost_update_,
+                            "Advanced: turn this off to never resubscribe to the update topic on a lost message. "
+                            "This will result in a potentially corrupted visualization of the octomap. "
+                            "This option is useful when playing bagfile data from the middle of a bagfile, "
+                            "or when the first full map update was not recorded.",
+                            this,
+                            SLOT( updateResubscribeOnLostUpdate() ));
 
   octree_render_property_ = new rviz::EnumProperty( "Voxel Rendering", "Occupied Voxels",
                                                     "Select voxel type.",
@@ -187,6 +198,11 @@ void OccupancyGridDisplay::updateQueueSize()
   queue_size_ = queue_size_property_->getInt();
 
   subscribe();
+}
+
+void OccupancyGridDisplay::updateResubscribeOnLostUpdate()
+{
+  resubscribe_on_lost_update_ = resubscribe_on_lost_update_property_->getBool();
 }
 
 void OccupancyGridDisplay::onEnable()
@@ -623,7 +639,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
         // Ignore the spurious update.
         return;
       }
-      else
+      else if (resubscribe_on_lost_update_)
       {
         // Somehow, the first full map was lost, resubscribe
         ROS_INFO_STREAM("octomap first full update lost, resubscribing to \""
@@ -632,12 +648,15 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
         return;
       }
     }
-    // Go ahead and set last sequence to what it would have been.
-    // This way, if we do not handle this message, or any subsequent messages,
-    // it will be detected, and we will re-subscribe to get the full map again.
-    update_last_seq_ = msg->octomap_bounds.header.seq - 1;
-    oc_tree_.reset();
-    first_full_map_update_received_ = true;
+    else
+    {
+      // Go ahead and set last sequence to what it would have been.
+      // This way, if we do not handle this message, or any subsequent messages,
+      // it will be detected, and we will re-subscribe to get the full map again.
+      update_last_seq_ = msg->octomap_bounds.header.seq - 1;
+      oc_tree_.reset();
+      first_full_map_update_received_ = true;
+    }
   }
   setStatus(StatusProperty::Ok, "Messages", QString::number(map_updates_received_) + " octomap updates received");
   setStatusStd(StatusProperty::Ok, "Type", msg->octomap_bounds.id.c_str());
@@ -673,7 +692,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
   // Only update saved sequence after all the above error cases have been processed.
   // This way, if we throw away an update message due to a TF error, for instance, we
   // will resubscribe to get the whole map.
-  if (update_last_seq_ + 1 < msg->octomap_bounds.header.seq)
+  if (resubscribe_on_lost_update_ && update_last_seq_ + 1 < msg->octomap_bounds.header.seq)
   {
     // A message was lost or discarded, leaving the updates out-of-sync.
     // Resubscribe to force a full map message.

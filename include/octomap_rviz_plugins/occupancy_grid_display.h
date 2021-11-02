@@ -78,6 +78,7 @@ public:
 
 private Q_SLOTS:
   void updateQueueSize();
+  void updateResubscribeOnLostUpdate();
   void updateTopic();
   void updateTreeDepth();
   void updateOctreeRenderMode();
@@ -136,6 +137,7 @@ protected:
   // Plugin properties
   rviz::IntProperty* queue_size_property_;
   rviz::RosTopicProperty* octomap_topic_property_;
+  rviz::BoolProperty* resubscribe_on_lost_update_property_;
   rviz::EnumProperty* octree_render_property_;
   rviz::EnumProperty* octree_coloring_property_;
   rviz::IntProperty* tree_depth_property_;
@@ -144,6 +146,7 @@ protected:
   rviz::FloatProperty* min_height_property_;
 
   u_int32_t queue_size_;
+  bool resubscribe_on_lost_update_;
   uint32_t maps_received_;
   uint32_t map_updates_received_;
   double color_factor_;
