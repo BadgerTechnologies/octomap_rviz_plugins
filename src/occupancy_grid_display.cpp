@@ -283,15 +283,25 @@ void OccupancyGridDisplay::scheduleResubscribeUpdates()
   // We can't clear the tf message filter inside the tf message filter
   // callback due to a sloppy locking architecture, so schedule resubscribing
   // on a one-shot timer that fires immediately.
-  resub_timer_ = threaded_nh_.createTimer(
-      ros::Duration(0.0),
-      std::bind(&OccupancyGridDisplay::resubscribeUpdates, this),
-      true);
+  if (!resub_pending_)
+  {
+    resub_pending_ = true;
+    resub_timer_ = threaded_nh_.createTimer(
+	ros::Duration(0.0),
+	std::bind(&OccupancyGridDisplay::resubscribeUpdates, this),
+	true);
+  }
 }
 
 void OccupancyGridDisplay::resubscribeUpdates()
 {
   std::unique_lock<std::recursive_mutex> lock(mutex_);
+  if (!resub_pending_)
+  {
+    // unsubscribe was called while a resub was pending, ignore.
+    return;
+  }
+  resub_pending_ = false;
   // It isn't safe to hold our lock and then call tf_update_sub_ clear, as it
   // grabs the lock that is held during our tf message filter callback. Fix
   // this by getting a local copy of the shared ptr with the lock, dropping our
@@ -313,6 +323,9 @@ void OccupancyGridDisplay::resubscribeUpdates()
     update_sub_local->subscribe();
   if (tf_update_sub_local)
     tf_update_sub_local->clear();
+  ROS_INFO_STREAM("octomap update topic \""
+      << octomap_topic_property_->getStdString()
+      << "_updates\" resubscribe updates complete");
 }
 
 void OccupancyGridDisplay::unsubscribe()
@@ -327,6 +340,9 @@ void OccupancyGridDisplay::unsubscribe()
   std::shared_ptr<tf2_ros::MessageFilter<octomap_msgs::OctomapUpdate>> tf_update_sub_local(tf_update_sub_);
 
   clear();
+  resub_pending_ = false;
+  using_updates_ = false;
+  map_updates_received_ = 0;
 
   try
   {
@@ -335,8 +351,6 @@ void OccupancyGridDisplay::unsubscribe()
     tf_update_sub_.reset();
     map_sub_.reset();
     update_sub_.reset();
-    using_updates_ = false;
-    map_updates_received_ = 0;
   }
   catch (ros::Exception& e)
   {
@@ -589,6 +603,12 @@ template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg)
 {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (resub_pending_)
+  {
+    // We have a resubscribe pending, but there was still an outstanding
+    // message callback. Throw this message away.
+    return;
+  }
   using_updates_ = true;
   // creating octree
   map_updates_received_++;
@@ -606,7 +626,8 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
       else
       {
         // Somehow, the first full map was lost, resubscribe
-        ROS_INFO_STREAM("octomap first full update lost, resubscribing");
+        ROS_INFO_STREAM("octomap first full update lost, resubscribing to \""
+	    << octomap_topic_property_->getStdString() << "_updates\"");
         scheduleResubscribeUpdates();
         return;
       }
