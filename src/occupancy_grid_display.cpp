@@ -87,6 +87,7 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
     queue_size_(5),
     color_factor_(0.8)
 {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
 
   octomap_topic_property_ = new RosTopicProperty( "Octomap Topic",
                                                   "",
@@ -156,11 +157,6 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
                                            "Defines the minimum height to display",
                                            this,
                                            SLOT (updateMinHeight() ));
-}
-
-void OccupancyGridDisplay::onInitialize()
-{
-  std::lock_guard<std::recursive_mutex> lock(mutex_);
 
   box_size_.resize(max_octree_depth_);
   cloud_.resize(max_octree_depth_);
@@ -171,10 +167,17 @@ void OccupancyGridDisplay::onInitialize()
   {
     std::stringstream sname;
     sname << "PointCloud Nr." << i;
-    delete cloud_[i];
     cloud_[i] = new rviz::PointCloud();
     cloud_[i]->setName(sname.str());
     cloud_[i]->setRenderMode(rviz::PointCloud::RM_BOXES);
+  }
+}
+
+void OccupancyGridDisplay::onInitialize()
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  for (std::size_t i = 0; i < max_octree_depth_; ++i)
+  {
     scene_node_->attachObject(cloud_[i]);
   }
 }
@@ -185,6 +188,7 @@ OccupancyGridDisplay::~OccupancyGridDisplay()
 
   unsubscribe();
 
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   for (std::vector<rviz::PointCloud*>::iterator it = cloud_.begin(); it != cloud_.end(); ++it) {
     delete *(it);
   }
@@ -195,13 +199,17 @@ OccupancyGridDisplay::~OccupancyGridDisplay()
 
 void OccupancyGridDisplay::updateQueueSize()
 {
-  queue_size_ = queue_size_property_->getInt();
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    queue_size_ = queue_size_property_->getInt();
+  }
 
   subscribe();
 }
 
 void OccupancyGridDisplay::updateResubscribeOnLostUpdate()
 {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   resubscribe_on_lost_update_ = resubscribe_on_lost_update_property_->getBool();
 }
 
@@ -375,9 +383,17 @@ void OccupancyGridDisplay::unsubscribe()
 
   lock.unlock();
 
-  // Now that the lock is released, destroy the subscribers.
-  // This would happen implicitly when the shared pointers go out of scope
-  // below, but make it explicit for clarity.
+  // The TF filters have a back-reference to the subscribers. The subscribers
+  // have a forward reference to the TF filters. If we destroy the TF filters
+  // first, a callback could come in and try to call the object after it is
+  // destroyed. If we destroy the subscribers first, the TF filter destructor
+  // fails trying to unregister from it. This cycle can be broken by first
+  // unsubscribing the subscribers. The lock can not be held as unsubscribe
+  // will wait for all outstanding callbacks to complete.
+  if (map_sub_local)
+    map_sub_local->unsubscribe();
+  if (update_sub_local)
+    update_sub_local->unsubscribe();
   tf_map_sub_local.reset();
   tf_update_sub_local.reset();
   map_sub_local.reset();
@@ -500,6 +516,7 @@ void OccupancyGridDisplay::update(float wall_dt, float ros_dt)
 
 void OccupancyGridDisplay::reset()
 {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   clear();
   maps_received_ = 0;
   setStatus(StatusProperty::Ok, "Messages", QString("0 binary octomap messages received"));
