@@ -81,6 +81,7 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
     new_points_received_(false),
     new_map_update_received_(false),
     resubscribe_on_lost_update_(true),
+    unsubscribing_(false),
     using_updates_(false),
     maps_received_(0),
     map_updates_received_(0),
@@ -184,17 +185,15 @@ void OccupancyGridDisplay::onInitialize()
 
 OccupancyGridDisplay::~OccupancyGridDisplay()
 {
-  std::size_t i;
-
   unsubscribe();
 
   std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (scene_node_)
+    scene_node_->detachAllObjects();
+
   for (std::vector<rviz::PointCloud*>::iterator it = cloud_.begin(); it != cloud_.end(); ++it) {
     delete *(it);
   }
-
-  if (scene_node_)
-    scene_node_->detachAllObjects();
 }
 
 void OccupancyGridDisplay::updateQueueSize()
@@ -357,7 +356,10 @@ void OccupancyGridDisplay::unsubscribe()
   std::unique_lock<std::recursive_mutex> lock(mutex_);
   // Local copy to use after dropping the lock. We can not manipulate the
   // message filters safely with our lock held as they hold locks when calling
-  // our callbacks.
+  // our callbacks. Set the unsubscribe_ boolean so any callback that happens
+  // after we drop the lock below will be ignored (to prevent that callback
+  // from adding a new subscription, for instance).
+  unsubscribing_ = true;
   std::shared_ptr<message_filters::Subscriber<octomap_msgs::Octomap>> map_sub_local(map_sub_);
   std::shared_ptr<message_filters::Subscriber<octomap_msgs::OctomapUpdate>> update_sub_local(update_sub_);
   std::shared_ptr<tf2_ros::MessageFilter<octomap_msgs::Octomap>> tf_map_sub_local(tf_map_sub_);
@@ -368,18 +370,11 @@ void OccupancyGridDisplay::unsubscribe()
   using_updates_ = false;
   map_updates_received_ = 0;
 
-  try
-  {
-    // reset filters
-    tf_map_sub_.reset();
-    tf_update_sub_.reset();
-    map_sub_.reset();
-    update_sub_.reset();
-  }
-  catch (ros::Exception& e)
-  {
-    setStatus(StatusProperty::Error, "Topic", (std::string("Error unsubscribing: ") + e.what()).c_str());
-  }
+  // reset filters
+  tf_map_sub_.reset();
+  tf_update_sub_.reset();
+  map_sub_.reset();
+  update_sub_.reset();
 
   lock.unlock();
 
@@ -398,6 +393,10 @@ void OccupancyGridDisplay::unsubscribe()
   tf_update_sub_local.reset();
   map_sub_local.reset();
   update_sub_local.reset();
+
+  lock.lock();
+  // Unsubscribing complete. Any outstanding callbacks will now be finished.
+  unsubscribing_ = false;
 }
 
 // method taken from octomap_server package
@@ -636,10 +635,10 @@ template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg)
 {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
-  if (resub_pending_)
+  if (resub_pending_ || unsubscribing_)
   {
-    // We have a resubscribe pending, but there was still an outstanding
-    // message callback. Throw this message away.
+    // We have a resubscribe or unsubscribe pending, but there was still an
+    // outstanding message callback. Throw this message away.
     return;
   }
   using_updates_ = true;
@@ -749,6 +748,11 @@ template <typename OcTreeType>
 void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg)
 {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (unsubscribing_)
+  {
+    // In the middle of unsubscribing and had a pending callback, do nothing
+    return;
+  }
   if(!using_updates_)
   {
     ++maps_received_;
@@ -918,6 +922,11 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::updateNewPoints()
 
 template <typename OcTreeType>
 TemplatedOccupancyGridDisplay<OcTreeType>::~TemplatedOccupancyGridDisplay(){
+  // Because we override the callbacks, and this object is destroyed before its
+  // parent, we must unsubscribe now to prevent our callbacks from being called
+  // after this child object is destroyed, and to prevent the octree we store
+  // from being used past end-of-life during such a callback.
+  unsubscribe();
 }
 
 

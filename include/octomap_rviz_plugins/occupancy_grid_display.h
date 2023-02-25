@@ -147,6 +147,7 @@ protected:
 
   u_int32_t queue_size_;
   bool resubscribe_on_lost_update_;
+  bool unsubscribing_;
   uint32_t maps_received_;
   uint32_t map_updates_received_;
   double color_factor_;
