@@ -140,6 +140,19 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
   alpha_property_->setMin(0.0);
   alpha_property_->setMax(1.0);
 
+  display_surrounded_voxels_ = false;
+  display_surrounded_voxels_property_ =
+    new rviz::BoolProperty( "Display Surrounded Voxels",
+                            display_surrounded_voxels_,
+                            "Turning this off hides all voxels which are surrounded by other voxels. "
+                            "Turning this on adds all voxels to the visualization. "
+                            "When alpha is < 1.0 turning this on gives more accurate results. "
+                            "Also, if the camera is moved inside a surrounded area, "
+                            "turning this on yields a more accurate visualization.",
+                            this,
+                            SLOT( updateDisplaySurroundedVoxels() ));
+
+
   tree_depth_property_ = new IntProperty("Max. Octree Depth",
                                          max_octree_depth_,
                                          "Defines the maximum tree depth",
@@ -467,6 +480,12 @@ void OccupancyGridDisplay::updateOctreeColorMode()
 void OccupancyGridDisplay::updateAlpha()
 {
   updateTopic();
+}
+
+void OccupancyGridDisplay::updateDisplaySurroundedVoxels()
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  display_surrounded_voxels_ = display_surrounded_voxels_property_->getBool();
 }
 
 void OccupancyGridDisplay::updateMaxHeight()
@@ -841,7 +860,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::updateNewPoints(const std_msgs::
           if (((int)oc_tree_->isNodeOccupied(*it) + 1) & render_mode_mask)
           {
             // check if current voxel has neighbors on all sides -> no need to be displayed
-            bool allNeighborsFound = true;
+            bool allNeighborsFound = !display_surrounded_voxels_;
 
             octomap::OcTreeKey key;
             octomap::OcTreeKey nKey = it.getKey();

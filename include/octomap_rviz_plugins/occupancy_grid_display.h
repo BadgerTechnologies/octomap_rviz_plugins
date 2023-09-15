@@ -84,6 +84,7 @@ private Q_SLOTS:
   void updateOctreeRenderMode();
   void updateOctreeColorMode();
   void updateAlpha();
+  void updateDisplaySurroundedVoxels();
   void updateMaxHeight();
   void updateMinHeight();
 
@@ -144,6 +145,7 @@ protected:
   rviz::EnumProperty* octree_coloring_property_;
   rviz::IntProperty* tree_depth_property_;
   rviz::FloatProperty* alpha_property_;
+  rviz::BoolProperty* display_surrounded_voxels_property_;
   rviz::FloatProperty* max_height_property_;
   rviz::FloatProperty* min_height_property_;
 
@@ -155,6 +157,7 @@ protected:
   double color_factor_;
   double min_probability_;
   double max_probability_;
+  bool display_surrounded_voxels_;
 };
 
 template <typename OcTreeType>
