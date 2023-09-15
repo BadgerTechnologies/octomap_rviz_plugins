@@ -312,9 +312,9 @@ void OccupancyGridDisplay::scheduleResubscribeUpdates()
   {
     resub_pending_ = true;
     resub_timer_ = threaded_nh_.createTimer(
-	ros::Duration(0.0),
-	std::bind(&OccupancyGridDisplay::resubscribeUpdates, this),
-	true);
+        ros::Duration(0.0),
+        std::bind(&OccupancyGridDisplay::resubscribeUpdates, this),
+        true);
   }
 }
 
@@ -660,7 +660,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
       {
         // Somehow, the first full map was lost, resubscribe
         ROS_INFO_STREAM("octomap first full update lost, resubscribing to \""
-	    << octomap_topic_property_->getStdString() << "_updates\"");
+            << octomap_topic_property_->getStdString() << "_updates\"");
         scheduleResubscribeUpdates();
         return;
       }
