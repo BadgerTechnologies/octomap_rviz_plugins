@@ -123,7 +123,6 @@ protected:
   VVPoint new_points_;
   VVPoint point_buf_;
   bool new_points_received_;
-  bool new_map_update_received_;
   bool using_updates_;
   bool resub_pending_;
   bool first_full_map_update_received_;

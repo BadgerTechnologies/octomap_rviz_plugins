@@ -79,7 +79,6 @@ enum OctreeVoxelColorMode
 OccupancyGridDisplay::OccupancyGridDisplay() :
     rviz::Display(),
     new_points_received_(false),
-    new_map_update_received_(false),
     resubscribe_on_lost_update_(true),
     unsubscribing_(false),
     using_updates_(false),
@@ -506,7 +505,6 @@ void OccupancyGridDisplay::update(float wall_dt, float ros_dt)
       cloud_[i]->setAlpha(alpha_property_->getFloat());
     }
     new_points_received_ = false;
-    new_map_update_received_ = false;
   }
   updateFromTF();
   lock.unlock();
@@ -739,7 +737,6 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
     box_size_[i] = oc_tree_->getNodeSize(i + 1);
   }
 
-  new_map_update_received_ = true;
   setStatusStd(StatusProperty::Ok, "Message", "Message received and processed");
   updateNewPoints();
 }
