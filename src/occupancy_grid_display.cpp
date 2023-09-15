@@ -88,6 +88,7 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
     color_factor_(0.8)
 {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
+  std::lock_guard<std::mutex> update_lock(update_mutex_);
 
   octomap_topic_property_ = new RosTopicProperty( "Octomap Topic",
                                                   "",
@@ -176,6 +177,7 @@ OccupancyGridDisplay::OccupancyGridDisplay() :
 void OccupancyGridDisplay::onInitialize()
 {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
+  std::lock_guard<std::mutex> update_lock(update_mutex_);
   for (std::size_t i = 0; i < max_octree_depth_; ++i)
   {
     scene_node_->attachObject(cloud_[i]);
@@ -187,6 +189,7 @@ OccupancyGridDisplay::~OccupancyGridDisplay()
   unsubscribe();
 
   std::lock_guard<std::recursive_mutex> lock(mutex_);
+  std::lock_guard<std::mutex> update_lock(update_mutex_);
   if (scene_node_)
     scene_node_->detachAllObjects();
 
@@ -478,7 +481,7 @@ void OccupancyGridDisplay::updateMinHeight()
 
 void OccupancyGridDisplay::clear()
 {
-  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  std::lock_guard<std::mutex> update_lock(update_mutex_);
 
   // reset rviz pointcloud boxes
   for (size_t i = 0; i < cloud_.size(); ++i)
@@ -489,7 +492,7 @@ void OccupancyGridDisplay::clear()
 
 void OccupancyGridDisplay::update(float wall_dt, float ros_dt)
 {
-  std::unique_lock<std::recursive_mutex> lock(mutex_);
+  std::unique_lock<std::mutex> update_lock(update_mutex_);
   if (new_points_received_)
   {
 
@@ -507,7 +510,7 @@ void OccupancyGridDisplay::update(float wall_dt, float ros_dt)
     new_points_received_ = false;
   }
   updateFromTF();
-  lock.unlock();
+  update_lock.unlock();
   context_->queueRender();
 }
 
@@ -680,8 +683,6 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
     return;
   }
 
-  header_ = msg->header;
-
   // Get update data
   std::shared_ptr<OcTreeType> update_bounds;
   std::shared_ptr<OcTreeType> update_values;
@@ -738,7 +739,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingUpdateMessageCallback(co
   }
 
   setStatusStd(StatusProperty::Ok, "Message", "Message received and processed");
-  updateNewPoints();
+  updateNewPoints(msg->header);
 }
 
 template <typename OcTreeType>
@@ -763,8 +764,6 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
     }
 
     ROS_DEBUG("Received OctomapBinary message (size: %d bytes)", (int)msg->data.size());
-
-    header_ = msg->header;
 
     // creating octree
     // Effectively deletes "tree"
@@ -791,7 +790,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
       box_size_[i] = oc_tree_->getNodeSize(i + 1);
     }
 
-    updateNewPoints();
+    updateNewPoints(msg->header);
   }
   else
   {
@@ -802,7 +801,7 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::incomingMapMessageCallback(const
 
 
 template <typename OcTreeType>
-void TemplatedOccupancyGridDisplay<OcTreeType>::updateNewPoints()
+void TemplatedOccupancyGridDisplay<OcTreeType>::updateNewPoints(const std_msgs::Header &header)
 {
   std::lock_guard<std::recursive_mutex> lock(mutex_);
   if(oc_tree_)
@@ -907,12 +906,15 @@ void TemplatedOccupancyGridDisplay<OcTreeType>::updateNewPoints()
 
     if (pointCount)
     {
+      // Minimize time holding off rendering by only locking the update_mutex_
+      // on new_points_ assignment.
+      std::lock_guard<std::mutex> update_lock(update_mutex_);
+      header_ = header;
 
       new_points_received_ = true;
 
       for (size_t i = 0; i < max_octree_depth_; ++i)
         new_points_[i].swap(point_buf_[i]);
-
     }
   }
 }

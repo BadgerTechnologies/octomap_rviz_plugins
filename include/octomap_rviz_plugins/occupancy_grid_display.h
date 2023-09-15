@@ -132,6 +132,9 @@ protected:
   std::vector<rviz::PointCloud*> cloud_;
   std::vector<double> box_size_;
   std_msgs::Header header_;
+  // update_mutex_ protects new_points_received_, new_points_, cloud_ and
+  // header_ which are shared with the update method
+  std::mutex update_mutex_;
 
   // Plugin properties
   rviz::IntProperty* queue_size_property_;
@@ -161,7 +164,7 @@ protected:
   ~TemplatedOccupancyGridDisplay();
   void incomingMapMessageCallback(const octomap_msgs::OctomapConstPtr& msg);
   void incomingUpdateMessageCallback(const octomap_msgs::OctomapUpdateConstPtr& msg);
-  void updateNewPoints();
+  void updateNewPoints(const std_msgs::Header &header);
   void setVoxelColor(rviz::PointCloud::Point& newPoint, typename OcTreeType::NodeType& node, double minZ, double maxZ);
   ///Returns false, if the type_id (of the message) does not correspond to the template paramter
   ///of this class, true if correct or unknown (i.e., no specialized method for that template).
